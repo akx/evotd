@@ -1,121 +1,577 @@
-class Gene
-	initialize: ->
-	evolve: (a, b, mutation = 0) ->
-
 toBits = (val, bits=8) -> (!!(val & (1 << i))) for i from 0 til bits
 fromBits = (bits) ->
 	val = 0
 	for bit, i of bits then if bit then val |= (1 << i)
 	return val
+
+lerp = (a, b, alpha) -> (b * (alpha)) + (a * (1 - alpha))
+birand = (a, b) -> (a + Math.random() * (b - a)) * (if Math.random() < 0.5 then -1 else +1)
+rand = (a, b) -> (a + Math.random() * (b - a))
+irand = (a, b) -> 0 | (a + Math.random() * (b - a))
+pick = (arr) -> arr[irand(0, arr.length)]
+
+
+lissajous = (ctx, time, ljParams) ->
+	w = Math.cos(time * ljParams.wd)
+	z = Math.sin(time * ljParams.zd)
+	Rr = (ljParams.R - ljParams.r)
+	for phi from 0 til 25 by 0.1
+		Rr_p = Rr / ljParams.r * phi
+		x = Rr * Math.cos(phi) + ljParams.d * Math.cos (w + Rr_p)
+		y = Rr * Math.sin(phi) - ljParams.d * Math.sin (z - Rr_p)
+		if phi == 0 then
+			ctx.moveTo x, y
+		else
+			ctx.lineTo x, y
+
+genLissajousParams = ->
+	{
+		R:	15 + Math.random() * 15
+		r:	5 + Math.random() * 10
+		d:	Math.random() * 5
+		wd:	birand 1.1, 1.4
+		zd:	birand 1.1, 1.4
+	}
+
+
+makeAstarNode = (x, y) -> {x, y, id: "#x,#y"}
+
+
+
+aStar = (start, goal, getNeighbors, dist = null, heuristic = null) ->
+	closed = {}
+	open = []
+	openIds = {}
+	cameFrom = {}
+	gScore = {}
+	fScore = {}
+
+	heuristic = heuristic or (node1, node2) -> Math.abs(node1.x - node2.x) + Math.abs(node1.y - node2.y)
+	dist = dist or (node1, node2) ->
+		dx = (node1.x - node2.x)
+		dy = (node1.y - node2.y)
+		return Math.sqrt(dx * dx + dy * dy)
+
+	putOpen = !(node, g) ->
+		open.push node
+		openIds[node.id] = 1
+		gScore[node.id] = g
 	
+	setF = !(node) ->
+		fScore[node.id] = gScore[node.id] + heuristic(node, goal)
+
+	reconstructPath = ->
+		current = goal
+		path = []
+		while (next = cameFrom[current.id]) then
+			path.unshift next
+			current = next
+		return path
+
+
+	putOpen(start, 0)
+	setF(start)
+
+	while open.length
+		open = open.sort (a, b) -> (fScore[a.id] - fScore[b.id])
+		current = open.shift!
+		delete openIds[current.id]
+
+		if current.id == goal.id then return reconstructPath!
+		closed[current.id] = 1
+		for neighbor of getNeighbors(current)
+			continue if closed[neighbor.id]
+			tentativeG = gScore[current.id] + dist(current, neighbor)
+			if not openIds[neighbor.id] or tentativeG < gScore[neighbor.id]
+				putOpen(neighbor, tentativeG)
+				cameFrom[neighbor.id] = current
+				fScore[neighbor.id] = gScore[neighbor.id] + heuristic(neighbor, goal)
+	return null
+
+######################################################################################################
+
+class Gene
+	initialize: ->
+	evolve: (a, b, mutation = 0) ->
 
 class EightBitGene extends Gene
-	initialize: -> 0 | (Math.random() * 256)
+	initialize: -> Math.random()
 	evolve: (a, b, mutation = 0) ->
-		aBits = eightBits a
-		bBits = eightBits b
+		aBits = eightBits (a * 255)
+		bBits = eightBits (b * 255)
 		cBits = for i from 0 til 8
 			v = (Math.random! < 0.5)
 			if Math.random! < mutation then v
 			else if v then aBits[i] else bBits[i]
-		return fromBits cBits
+		return (fromBits(cBits) / 256)
 
+class FloatGene extends Gene
+	initialize: -> Math.random!
+	evolve: (a, b, mutation = 0) ->
+		if Math.random() < mutation then return @initialize!
+		return lerp(a, b, rand(0.3, 0.7))
 
 class Genome
 	(@genes) ->
 
 	initialize: ->
 		obj = {}
-		obj[name] = attr.initialize! for attr, name in @genes 
+		obj[name] = attr.initialize! for name, attr in @genes 
 		return obj
 
-class Tower
-	(@gridX, @gridY, @attributes) ->
+	evolve: (a, b, mutation = 0) ->
+		obj = {}
+		for name, attr in @genes
+			attrA = a[name]
+			attrB = b[name]
+
+			if attrA !== undefined and attrB !== undefined then
+				value = attr.evolve attrA, attrB, mutation
+			else
+				value = attr.initialize!
+			obj[name] = value
+		return obj
+
+######################################################################################################
+
+class GridObject
+	->
+		@gridX = @gridY = @x = @y = 0
+
+	setGridCoords: !(gridX, gridY) ->
+		@x = (@gridX = 0 | gridX) * 32 + 16
+		@y = (@gridY = 0 | gridY) * 32 + 16
+
+	updateGridCoordsFromXY: ! ->
+		@gridX = 0 | (@x / 32)
+		@gridY = 0 | (@y / 32)
+
+class Tower extends GridObject
+	(@attributes) -> super!
+
+	draw: !(ctx) ->
+		hue = 0 | (@attributes.hue * 360)
+		pxHeight = 8 + (@attributes.height * 48)
+		baseWidth = 3 + (@attributes.baseWidth * 27)
+		topWidth = 3 + (@attributes.topWidth * 17)
 
 
-	draw: (ctx) ->
-		hue = 0 | ((@attributes.hue / 256.0) * 360)
-		ctx.fillStyle = "hsv(#hue,100%,100%)"
-		pxHeight = 8 + (@attributes.height / 256.0 * 32)
 		ctx.beginPath!
-		for i from 0 til pxHeight by 2
-			sz = (30 * (i / pxHeight))
-			ctx.arc 0, 0, sz, 0, 6.282
+		ctx.fillStyle = "hsl(#hue,100%,50%)"
+		ctx.strokeStyle = "transparent"		
+		for i from 0 til pxHeight by 3
+			sz = lerp topWidth, baseWidth, (1.0 - (i / pxHeight))
+			#xo = Math.cos (i) * 5 * @attributes.form
+			#yo = Math.sin (i * @attributes.form) * 3
+			ctx.arc 0, -i, sz / 2, 0, 6.282
 		ctx.fill!
 
+class Spawner extends GridObject
+	->
+		super!
+		@ljParams = genLissajousParams!
+		@figureOutNextSpawn!
+
+	figureOutNextSpawn: !->
+		@nextSpawn = time + rand(1, 5)
+
+	draw: !(ctx) ->
+		ctx.save!
+		ctx.rotate time
+		ctx.beginPath!
+		ctx.strokeStyle = "red"
+		ctx.lineWidth = 1
+		lissajous ctx, time, @ljParams
+		ctx.stroke!
+		ctx.restore!
+
+	step: !->
+		if @nextSpawn and time >= @nextSpawn then
+			#@figureOutNextSpawn!
+			@nextSpawn = 0
+			@spawn!
+
+	spawn: !->
+		if world.creeps.length then
+			genome = enemyGenome.evolve pick(world.creeps), pick(world.creeps), world.mutationRate
+		else
+			genome = enemyGenome.initialize!
+		creep = new Enemy(genome)
+		creep.setGridCoords(@gridX, @gridY)
+		creep.reroute!
+		world.creeps.push creep
+
+class Heart extends GridObject
+	->
+		super!
+		@ljParams = genLissajousParams!
+
+	draw: !(ctx) ->
+		ctx.save!
+		ctx.rotate -time
+		ctx.beginPath!
+		ctx.strokeStyle = "lime"
+		ctx.lineWidth = 1
+		lissajous ctx, time, @ljParams
+		ctx.stroke!
+		ctx.restore!
+
+class Boulder extends GridObject
+	->
+		super!
+		@blocking = true
+
+	draw: !(ctx) ->
+		ctx.beginPath!
+		ctx.fillStyle = "#444"
+		ctx.strokeStyle = "silver"
+		ctx.lineWidth = 2
+		ctx.rect -12, -12, 24, 24
+		ctx.fill!
+		ctx.stroke!
+		ctx.beginPath!
+		ctx.fillStyle = "#666"
+		ctx.rect -12, -24, 24, 24
+		ctx.fill!
+		ctx.stroke!
+
+class Enemy extends GridObject
+	(@attributes) ->
+		super!
+		@route = null
+
+	draw: !(ctx) ->
+		ctx.beginPath!
+		ctx.fillStyle = "yellow"
+		ctx.rect -3, -3, 6, 6
+		ctx.fill!
+
+	step: !->
+		lastTime = (@lastTime || time)
+		delta = (time - lastTime)
+		speed = (@attributes.speed * 4)
+
+		if @route and @route.length then
+			nextNode = @route[0]
+			dx = @x - nextNode.worldX
+			dy = @y - nextNode.worldY
+			if (dx * dx + dy * dy) < (5 * 5) then
+				@route.unshift!
+			else
+				dir = Math.atan2(dy, dx)
+				@x += Math.cos(dir) * speed
+				@y += Math.sin(dir) * speed
+		@lastTime = time
+
+	reroute: ! ->
+		@updateGridCoordsFromXY!
+		start = makeAstarNode @gridX, @gridY
+		end = makeAstarNode world.heart.gridX, world.heart.gridY
+		route = aStar start, end, (world.~getAstarNeighbors)
+		route = route || [end] # Fine! SMASH.
+		for point of route then
+			point.worldX = point.x + irand(4, 28)
+			point.worldY = point.y + irand(4, 28)
+
+		@route = route
 
 
 
 
-
-towerGenome = new Genome {
-	height:				new EightBitGene()
-	form:				new EightBitGene()
-	range:				new EightBitGene()
-	hue:				new EightBitGene()
-	ammoSpeed:			new EightBitGene()
-	reloadSpeed:		new EightBitGene()
-	acquisitionSpeed:	new EightBitGene()
-}
-
-canvas = null
-ctx = null
-mouse = {b: false, x: 0, y: 0, downX: 0, downY: 0}
-
-towers = []
-creeps = []
-ammo = []
-towerTray = []
-time = 0
-
-drawScene = ->
-	drawables = [].concat(towers, creeps, ammo)
-	drawables.sort((a, b) -> b.y - a.y)
-	for d of drawables
-		ctx.translate d.x, d.y
-		d.draw ctx
-		ctx.translate -d.x, -d.y
+class World
+	->
+		@towers = []
+		@creeps = []
+		@ammo = []
+		@towerTray = []
+		@objs = []
+		@mutationRate = 0.02
+		@heart = null
 
 
-draw = ->
-	ctx.fillStyle = "#000"
-	ctx.fillRect 0, 0, 800, 600
-	drawScene!
+	getAstarNeighbors: (node) ->
+		{x, y} = node
+		neighbors = []
+		if x > 0 then neighbors.push(makeAstarNode(x - 1, y))
+		if y > 0 then neighbors.push(makeAstarNode(x, y - 1))
+		if x < gridMaxX then neighbors.push(makeAstarNode(x + 1, y))
+		if y < gridMaxY then neighbors.push(makeAstarNode(x, y + 1))
 
-
-
+		w = @
+		neighbors = neighbors.filter (node) -> w.isPlaceable(node.x, node.y)
+		return neighbors
 	
 
-step = ->
-	time += 1 / 30.0
-	draw!
-
-newGame = ->
-	towers := []
-	creeps := []
-	ammo := []
-	towerTray := []
-	time := 0
-
-
-init = ->
-	$ = -> document.getElementById it
-	canvas := $("canvas")
-	ctx := canvas.getContext "2d"
-	canvas.addEventListener "mousedown", !(event) ->
-		mouse.b = true
-		mouse.x = mouse.downX = event.offsetX
-		mouse.y = mouse.downY = event.offsetY
-	canvas.addEventListener "mouseup", !(event) ->
-		mouse.b = false
-		mouse.x = event.offsetX
-		mouse.y = event.offsetY
-	canvas.addEventListener "mousemove", !(event) ->
-		mouse.x = event.offsetX
-		mouse.y = event.offsetY
-
-	setInterval step, 1000 / 30.0
+	_checkGridObj: (arrGridObjs, gridX, gridY, blockingOnly = false) ->
+		for obj of arrGridObjs then if obj.gridX == gridX and obj.gridY == gridY and (not blockingOnly or (blockingOnly and obj.blocking)) then return obj
 
 
 
-(window||@).EvoTD = {init}
+	isPlaceable: (gridX, gridY) ->
+		return (!@_checkGridObj(@towers, gridX, gridY) and !@_checkGridObj(@objs, gridX, gridY, true))
+
+	placeTower: (tower, gridX, gridY) ->
+		for i from 0 til @towerTray.length
+			if @towerTray[i] == tower then
+				@towerTray.splice i, 1
+				break
+		tower.setGridCoords(gridX, gridY)
+		@towers.push tower
+
+		creep.reroute! for creep of @creeps
+
+	_process: (aDrawables) ->
+		i = 0
+		while i < aDrawables.length
+			d = aDrawables[i]
+			d.step?!
+			if d.dead then
+				console.log "Killing #d"
+				aDrawables.splice i, 1
+				continue
+			i += 1
+		return aDrawables
+
+	draw: (ctx) ->
+		drawables = [].concat(
+			@_process(@towers),
+			@_process(@objs),
+			@_process(@creeps),
+			@_process(@ammo)
+		)
+
+
+		drawables.sort((a, b) -> a.y - b.y)
+		for d of drawables
+			ctx.translate d.x, d.y
+			d.draw ctx
+			ctx.translate -d.x, -d.y
+
+	newGame: !->
+		for x from 0 til 5 
+			@towerTray.push new Tower(towerGenome.initialize!)
+		spawner = new Spawner()
+		spawner.setGridCoords(0, 0 | (Math.random() * gridMaxY) - 1)		
+		@objs.push spawner
+
+		@heart = heart = new Heart()
+		heart.setGridCoords(gridMaxX - 1, 0 | (Math.random() * gridMaxY) - 1)		
+		@objs.push heart
+
+		for i from 0 til 5
+			boulder = new Boulder()
+			x = irand 3, gridMaxX - 3
+			y = irand 0, gridMaxY - 1
+			for ever
+				if @isPlaceable(x, y) then
+					boulder.setGridCoords(x, y)
+					break
+			@objs.push boulder
+
+
+
+validGridCoords = (gridX, gridY) -> (gridX >= 0 and gridX < gridMaxX and gridY >= 0 and gridY < gridMaxY)
+gridMaxX = 25
+gridMaxY = 17
+world = null
+time = 0
+
+towerGenome = new Genome {
+	height:				new FloatGene()
+	baseWidth:			new FloatGene()
+	topWidth:			new FloatGene()
+	form:				new FloatGene()
+	range:				new FloatGene()
+	hue:				new FloatGene()
+	ammoSpeed:			new FloatGene()
+	reloadSpeed:		new FloatGene()
+	acquisitionSpeed:	new FloatGene()
+}
+
+enemyGenome = new Genome {
+	speed:				new FloatGene()
+	health:				new FloatGene()
+	size:				new FloatGene()
+	flying:				new FloatGene()
+}
+
+let document, window
+
+
+	canvas = null
+	ctx = null
+	mouse = {b: false, x: 0, y: 0, down: {}}
+	traySelected = null
+	worldSelected = null
+	tooltipText = null
+	
+
+	setTooltip = !->
+		tooltipText := "#it"
+
+	drawScene = ->
+
+		ctx.beginPath!
+		ctx.strokeStyle = "purple"
+		ctx.lineWidth = 1
+		for x from 0 til 800 by 32
+			ctx.moveTo x + 0.5, 0
+			ctx.lineTo x + 0.5, 544
+		for y from 0 til 544 by 32
+			ctx.moveTo 0, y + 0.5
+			ctx.lineTo 800, y + 0.5
+		ctx.stroke!
+
+		if traySelected then
+			if validGridCoords(mouse.gridX, mouse.gridY) then
+				p = world.isPlaceable(mouse.gridX, mouse.gridY)
+				ctx.beginPath!
+				ctx.strokeStyle = (if p then "white" else "red")
+				ctx.lineWidth = 2
+				ctx.rect mouse.gridX * 32, mouse.gridY * 32, 32, 32
+				ctx.stroke!
+				if p then
+					setTooltip "Place tower"
+
+		worldSelectedChanged = false
+		canEvolve = (world.towerTray.length < 10)
+		if not traySelected then
+			for tower of world.towers then
+				if worldSelected == tower or tower.gridX == mouse.gridX and tower.gridY == mouse.gridY then
+					ctx.beginPath!
+					ctx.strokeStyle = (if worldSelected == tower then "magenta" else "purple")
+					if worldSelected and worldSelected != tower then
+						if canEvolve then
+							ctx.strokeStyle = "magenta"
+							setTooltip "Evolve towers"
+						else
+							ctx.strokeStyle = "red"
+							setTooltip "Can't evolve, too many in tray"
+
+					ctx.lineWidth = 4
+					ctx.rect tower.gridX * 32, tower.gridY * 32, 32, 32
+					ctx.stroke!
+					if mouse.b then
+						if canEvolve and worldSelected and worldSelected != tower then
+							evTower = new Tower(towerGenome.evolve(worldSelected.attributes, tower.attributes, world.mutationRate))
+							world.towerTray.push evTower
+							worldSelected := null
+						else
+							worldSelected := tower
+							worldSelectedChanged = true
+
+		world.draw ctx
+
+	drawTray = !->
+
+		ctx.strokeStyle = "cyan"
+		ctx.lineWidth = 1
+		ctx.beginPath!
+		ctx.moveTo 0, 544
+		ctx.lineTo 800, 544
+		ctx.stroke!
+
+		for tower, i of world.towerTray
+			ctx.save!
+			tx = 16 + i * 32
+			ctx.translate tx, 585
+			if mouse.x >= tx - 16 and mouse.x < tx + 16 and mouse.y > 544 or (traySelected == tower) then
+				if traySelected != tower then
+					setTooltip "Select tower to place"
+				if mouse.b then
+					traySelected := tower
+					worldSelected := null
+				ctx.beginPath!
+				ctx.strokeStyle = (if tower == traySelected then "white" else "magenta")
+				ctx.rect -15, -15, 30, 30
+				ctx.stroke!
+			tower.draw(ctx)
+			ctx.restore!
+
+
+	draw = !->
+		ctx.fillStyle = "#000"
+		ctx.fillRect 0, 0, 800, 600
+		tooltipText := null
+		drawScene!
+		drawTray!
+		if tooltipText then
+			ctx.font = "12px Segoe UI, sans-serif"
+			w = ctx.measureText(tooltipText).width
+			ttX = mouse.x + 10
+			if ttX + w + 5 > 800 then ttX = mouse.x - 10 - w
+			ttY = Math.min(580, mouse.y - 5)
+			ttX += 0.5
+			ttY += 0.5
+
+			ctx.fillStyle = "rgba(0,0,0,0.5)"
+			ctx.strokeStyle = "white"
+			ctx.lineWidth = 1
+			ctx.beginPath!
+			ctx.rect ttX, ttY, w + 6, 16
+			ctx.fill!
+			ctx.stroke!
+			ctx.beginPath!
+			ctx.fillStyle = "white"
+			ctx.fillText tooltipText, ttX + 2, ttY + 12
+
+
+
+	click = !->
+		gridX = mouse.gridX
+		gridY = mouse.gridY
+		if traySelected then
+			if validGridCoords(gridX, gridY) then
+				if traySelected and world.isPlaceable(gridX, gridY) then
+					world.placeTower traySelected, gridX, gridY
+				traySelected := null
+		if worldSelected and validGridCoords(gridX, gridY) and world.isPlaceable(gridX, gridY) then
+			worldSelected := null
+
+
+	step = ->
+		time += 1 / 30.0
+		draw!
+
+	newGame = ->
+		world := new World()
+		world.newGame!
+		
+
+
+	init = ->
+		$ = -> document.getElementById it
+		canvas := $("canvas")
+		ctx := canvas.getContext "2d"
+
+		handleMove = (into, event) ->
+			into.x = event.offsetX
+			into.y = event.offsetY
+			gx = 0 | (into.x / 32)
+			gy = 0 | (into.y / 32)
+			if validGridCoords(gx, gy) then
+				into.gridX = gx
+				into.gridY = gy
+			else
+				into.gridX = into.gridY = -1
+
+
+		canvas.addEventListener "mousedown", !(event) ->
+			mouse.b = true
+			handleMove mouse, event
+			handleMove mouse.down, event
+		canvas.addEventListener "mouseup", !(event) ->
+			mouse.b = false
+			handleMove mouse, event
+		canvas.addEventListener "mousemove", !(event) ->
+			handleMove mouse, event
+		canvas.addEventListener "click", !(event) ->
+			handleMove mouse, event
+			click!
+
+		newGame!
+		setInterval step, 1000 / 20.0
+
+
+
+	window.EvoTD = {init}
