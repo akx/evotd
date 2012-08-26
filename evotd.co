@@ -7,6 +7,12 @@
 # This source code is messy, woefully uncommented and written in Coco.
 # Best of luck deciphering it. If you do learn something and use that in your own projects,
 # I certainly wouldn't mind a shout-out. Other than that... just go ahead and plunder.
+#
+# I also won't mind derivative versions if you feel like hacking, but I'd love to see them!
+# So if you do that, gimme a shout-out on Twitter or LD or email -- akx at iki dot fi. Thanks.
+#
+# Built from scratch.
+
 
 toBits = (val, bits=8) -> (!!(val & (1 << i))) for i from 0 til bits
 fromBits = (bits) ->
