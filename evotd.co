@@ -1,0 +1,121 @@
+class Gene
+	initialize: ->
+	evolve: (a, b, mutation = 0) ->
+
+toBits = (val, bits=8) -> (!!(val & (1 << i))) for i from 0 til bits
+fromBits = (bits) ->
+	val = 0
+	for bit, i of bits then if bit then val |= (1 << i)
+	return val
+	
+
+class EightBitGene extends Gene
+	initialize: -> 0 | (Math.random() * 256)
+	evolve: (a, b, mutation = 0) ->
+		aBits = eightBits a
+		bBits = eightBits b
+		cBits = for i from 0 til 8
+			v = (Math.random! < 0.5)
+			if Math.random! < mutation then v
+			else if v then aBits[i] else bBits[i]
+		return fromBits cBits
+
+
+class Genome
+	(@genes) ->
+
+	initialize: ->
+		obj = {}
+		obj[name] = attr.initialize! for attr, name in @genes 
+		return obj
+
+class Tower
+	(@gridX, @gridY, @attributes) ->
+
+
+	draw: (ctx) ->
+		hue = 0 | ((@attributes.hue / 256.0) * 360)
+		ctx.fillStyle = "hsv(#hue,100%,100%)"
+		pxHeight = 8 + (@attributes.height / 256.0 * 32)
+		ctx.beginPath!
+		for i from 0 til pxHeight by 2
+			sz = (30 * (i / pxHeight))
+			ctx.arc 0, 0, sz, 0, 6.282
+		ctx.fill!
+
+
+
+
+
+
+towerGenome = new Genome {
+	height:				new EightBitGene()
+	form:				new EightBitGene()
+	range:				new EightBitGene()
+	hue:				new EightBitGene()
+	ammoSpeed:			new EightBitGene()
+	reloadSpeed:		new EightBitGene()
+	acquisitionSpeed:	new EightBitGene()
+}
+
+canvas = null
+ctx = null
+mouse = {b: false, x: 0, y: 0, downX: 0, downY: 0}
+
+towers = []
+creeps = []
+ammo = []
+towerTray = []
+time = 0
+
+drawScene = ->
+	drawables = [].concat(towers, creeps, ammo)
+	drawables.sort((a, b) -> b.y - a.y)
+	for d of drawables
+		ctx.translate d.x, d.y
+		d.draw ctx
+		ctx.translate -d.x, -d.y
+
+
+draw = ->
+	ctx.fillStyle = "#000"
+	ctx.fillRect 0, 0, 800, 600
+	drawScene!
+
+
+
+	
+
+step = ->
+	time += 1 / 30.0
+	draw!
+
+newGame = ->
+	towers := []
+	creeps := []
+	ammo := []
+	towerTray := []
+	time := 0
+
+
+init = ->
+	$ = -> document.getElementById it
+	canvas := $("canvas")
+	ctx := canvas.getContext "2d"
+	canvas.addEventListener "mousedown", !(event) ->
+		mouse.b = true
+		mouse.x = mouse.downX = event.offsetX
+		mouse.y = mouse.downY = event.offsetY
+	canvas.addEventListener "mouseup", !(event) ->
+		mouse.b = false
+		mouse.x = event.offsetX
+		mouse.y = event.offsetY
+	canvas.addEventListener "mousemove", !(event) ->
+		mouse.x = event.offsetX
+		mouse.y = event.offsetY
+
+	setInterval step, 1000 / 30.0
+
+
+
+(window||@).EvoTD = {init}
