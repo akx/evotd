@@ -1069,6 +1069,8 @@ let document, window
 			world.sellTower inspectTower
 		if keyCode == 99 and inspectTower and world.credits >= 10 and world.towerTray.length < 10 then
 			world.cloneTower inspectTower
+		if keyCode == 97 and world.towerTray.length > 0 then
+			traySelected := world.towerTray[0]
 
 	step = ->
 		time += 1 / 22.0

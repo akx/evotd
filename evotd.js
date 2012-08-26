@@ -1290,7 +1290,10 @@
         world.sellTower(inspectTower);
       }
       if (keyCode == 99 && inspectTower && world.credits >= 10 && world.towerTray.length < 10) {
-        return world.cloneTower(inspectTower);
+        world.cloneTower(inspectTower);
+      }
+      if (keyCode == 97 && world.towerTray.length > 0) {
+        return traySelected = world.towerTray[0];
       }
     };
     step = function(){
