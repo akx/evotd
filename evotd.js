@@ -1,5 +1,5 @@
 (function(){
-  var toBits, fromBits, lerp, birand, rand, irand, pick, rangeCheck, lissajous, genLissajousParams, makeAstarNode, aStar, Gene, EightBitGene, FloatGene, Genome, GridObject, Tower, Spawner, Heart, Boulder, Enemy, Shot, World, validGridCoords, gridMaxX, gridMaxY, world, time, debug, towerGenome, traitNames, enemyGenome;
+  var toBits, fromBits, lerp, birand, rand, irand, pick, rangeCheck, lissajous, genLissajousParams, fontStack, makeAstarNode, aStar, sounds, enableSound, loadSound, playSound, Gene, EightBitGene, FloatGene, Genome, GridObject, Tower, Spawner, Heart, Boulder, Enemy, Shot, World, validGridCoords, gridMaxX, gridMaxY, world, time, debug, towerGenome, traitNames, enemyGenome;
   toBits = function(val, bits){
     var i, results$ = [];
     bits == null && (bits = 8);
@@ -68,6 +68,7 @@
       zd: birand(1.1, 1.4)
     };
   };
+  fontStack = "Corbel, Segoe UI, Frutiger Linotype, sans-serif";
   makeAstarNode = function(x, y){
     return {
       x: x,
@@ -137,6 +138,23 @@
     function fn$(a, b){
       return fScore[a.id] - fScore[b.id];
     }
+  };
+  sounds = {};
+  enableSound = true;
+  loadSound = function(name, url){
+    var audio;
+    audio = new Audio();
+    audio.setAttribute("src", url);
+    audio.load();
+    return sounds[name] = audio;
+  };
+  playSound = function(name){
+    var sound;
+    if (!enableSound) {
+      return;
+    }
+    sound = sounds[name];
+    return sound.play();
   };
   Gene = (function(){
     Gene.displayName = 'Gene';
@@ -210,6 +228,8 @@
     prototype.evolve = function(a, b, mutation){
       var obj, name, ref$, attr, attrA, attrB, value;
       mutation == null && (mutation = 0);
+      a = a.attributes || a;
+      b = b.attributes || b;
       obj = {};
       for (name in ref$ = this.genes) {
         attr = ref$[name];
@@ -252,6 +272,9 @@
       this.nextReload = 0;
       this.nextShot = 0;
       this.nextAcquisition = 0;
+      this.health = this.maxHealth = 5;
+      this.damageBlip = false;
+      this.generation = 0;
       this.actual = {
         maxAmmo: 0 | lerp(1, 50, this.attributes.reloadAmmo),
         shotInterval: 1.0 / lerp(3, 20, this.attributes.shootSpeed),
@@ -260,8 +283,10 @@
         reloadTime: lerp(1, 5, this.attributes.reloadSpeed),
         ammoDamage: lerp(1, 35, this.attributes.ammoDamage),
         ammoSpeed: lerp(3, 20, this.attributes.ammoSpeed),
-        ammoRange: lerp(80, 300, this.attributes.ammoRange),
-        slowingAmmo: this.attributes.slowingAmmo > 0.75
+        ammoRange: lerp(80, 400, this.attributes.ammoRange),
+        ammoDeceleration: this.attributes.ammoDeceleration,
+        slowingAmmo: this.attributes.slowingAmmo > 0.75,
+        homingAmmo: this.attributes.homingAmmo > 0.85
       };
       this.actual.dps = this.actual.ammoDamage / (1.0 / this.actual.shotInterval);
       this.depletionTime = this.actual.maxAmmo * this.actual.shotInterval + 0.1;
@@ -331,25 +356,29 @@
     prototype.shoot = function(target){
       var shot;
       shot = new Shot(this.x, this.y, this.fillStyle, this.actual, target);
-      return world.ammo.push(shot);
+      world.ammo.push(shot);
+      return playSound("shoot");
     };
     prototype.draw = function(ctx){
       var pxHeight, baseWidth, topWidth, i, alpha, sz, hue, abw;
       pxHeight = 8 + this.attributes.height * 48;
       baseWidth = 3 + this.attributes.baseWidth * 27;
       topWidth = 3 + this.attributes.topWidth * 17;
-      ctx.font = "12px Segoe UI, sans-serif";
+      ctx.font = "12px " + fontStack;
       ctx.strokeStyle = "transparent";
       for (i = 0; i < pxHeight; i += 3) {
         alpha = 1.0 - i / pxHeight;
         alpha = Math.pow(alpha, this.attributes.form * 2);
         sz = lerp(topWidth, baseWidth, alpha);
         hue = lerp(this.attributes.hue * 360, this.attributes.hueTop * 360, alpha);
-        ctx.fillStyle = "hsl(" + hue + ", 100%, 50%)";
+        ctx.fillStyle = this.damageBlip
+          ? "white"
+          : "hsl(" + hue + ", 100%, 50%)";
         ctx.beginPath();
         ctx.arc(0, -i, sz / 2, 0, 6.282);
         ctx.fill();
       }
+      this.damageBlip = false;
       if (this.onStage) {
         if (this.ammo > 0) {
           ctx.beginPath();
@@ -368,6 +397,14 @@
         }
       }
     };
+    prototype.damage = function(){
+      this.health--;
+      this.damageBlip = true;
+      playSound("tower-hurt");
+      if (this.health <= 0) {
+        return this.dead = true;
+      }
+    };
     return Tower;
   }(GridObject));
   Spawner = (function(superclass){
@@ -376,12 +413,19 @@
     function Spawner(){
       superclass.call(this);
       this.ljParams = genLissajousParams();
-      this.figureOutNextSpawn();
+      this.figureOutNextSpawn(4);
+      this.pool = [enemyGenome.initialize(), enemyGenome.initialize(), enemyGenome.initialize(), enemyGenome.initialize(), enemyGenome.initialize()];
+      this.enemiesLeft = this.enemiesTotal = 200;
+      this.enemiesSpawned = 0;
     }
-    prototype.figureOutNextSpawn = function(){
-      this.nextSpawn = time + rand(0.5, 4);
+    prototype.figureOutNextSpawn = function(multiplier){
+      var ival;
+      multiplier == null && (multiplier = 1);
+      ival = rand(0.5, 4) * multiplier;
+      return this.nextSpawn = time + ival;
     };
     prototype.draw = function(ctx){
+      var timeToNextSpawn;
       ctx.save();
       ctx.rotate(time);
       ctx.beginPath();
@@ -390,21 +434,33 @@
       lissajous(ctx, time, this.ljParams);
       ctx.stroke();
       ctx.restore();
+      if (this.nextSpawn > 0) {
+        timeToNextSpawn = Math.min(1, (this.nextSpawn - time) / 5);
+        ctx.strokeStyle = "white";
+        ctx.beginPath();
+        ctx.lineWidth = 1;
+        ctx.arc(0, 0, 8 + Math.cos(time) * 4, 0, lerp(0, 6.282, timeToNextSpawn));
+        ctx.stroke();
+      }
     };
     prototype.step = function(){
-      if (!world.gameOver && this.nextSpawn && time >= this.nextSpawn) {
+      if (!world.gameOver && this.enemiesLeft && this.nextSpawn && time >= this.nextSpawn) {
         this.figureOutNextSpawn();
         this.spawn();
       }
     };
     prototype.spawn = function(){
-      var genome, creep;
-      if (world.creeps.length) {
-        genome = enemyGenome.evolve(pick(world.creeps).attributes, pick(world.creeps).attributes, world.enemyMutationRate);
+      var pool, genome, creep;
+      this.enemiesLeft--;
+      this.enemiesSpawned++;
+      pool = [].concat(this.pool).concat(world.creeps);
+      if (pool.length && Math.random() > 0.95) {
+        genome = enemyGenome.evolve(pick(pool), pick(pool), world.enemyMutationRate);
       } else {
         genome = enemyGenome.initialize();
       }
       creep = new Enemy(genome);
+      creep.spawner = this;
       creep.setGridCoords(this.gridX, this.gridY);
       creep.reroute();
       world.creeps.push(creep);
@@ -423,6 +479,7 @@
     prototype.damage = function(){
       this.life--;
       this.damageBlip = 15;
+      playSound("core-hit");
     };
     prototype.draw = function(ctx){
       ctx.strokeStyle = "lime";
@@ -443,6 +500,7 @@
       ctx.stroke();
       ctx.restore();
       if (this.life < this.maxLife) {
+        ctx.strokeStyle = "white";
         ctx.save();
         ctx.rotate(time * 3);
         ctx.beginPath();
@@ -484,11 +542,10 @@
       this.attributes = attributes;
       superclass.call(this);
       this.route = null;
-      this.actualSpeed = lerp(1, 7, this.attributes.speed) * Math.sqrt(this.attributes.health);
+      this.actualSpeed = lerp(2, 12, this.attributes.speed) * Math.sqrt(this.attributes.health);
       this.actualSize = lerp(6, 32, this.attributes.size) / 2;
       this.maxHealth = this.health = 0 | lerp(30, 500, this.attributes.health);
       this.dx = this.dy = 0;
-      console.log(this.attributes);
     }
     prototype.draw = function(ctx){
       var hue, r, s, abw;
@@ -501,7 +558,7 @@
         this.damageBlip = false;
       }
       ctx.fillStyle = ctx.strokeStyle = s;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = this.rage && (time * 3) % 1 < 0.5 ? 6 : 2;
       ctx.arc(0, 0, this.actualSize, r, r + 4.7);
       ctx.stroke();
       if (this.health > 0 && this.health < this.maxHealth) {
@@ -512,11 +569,23 @@
       }
     };
     prototype.step = function(){
-      var lastTime, delta, nextNode, dx, dy, dist2, dir, speed, ndx, ndy;
+      var lastTime, delta, nextNode, dx, dy, dist2, dir, speed, ndx, ndy, tower;
       lastTime = this.lastTime || time;
       delta = time - lastTime;
       if (this.route && this.route.length) {
         nextNode = this.route[0];
+        this.rage = false;
+      } else {
+        nextNode = {
+          worldX: world.heart.x,
+          worldY: world.heart.y
+        };
+        this.rage = true;
+        if (Math.random() < 0.1) {
+          this.reroute();
+        }
+      }
+      if (nextNode) {
         dx = nextNode.worldX - this.x;
         dy = nextNode.worldY - this.y;
         dist2 = dx * dx + dy * dy;
@@ -524,7 +593,7 @@
           this.route.shift();
         } else {
           dir = Math.atan2(dy, dx);
-          speed = Math.min(Math.sqrt(dist2), this.actualSpeed);
+          speed = Math.min(Math.sqrt(dist2), this.actualSpeed) * (this.rage ? 3 : 1);
           ndx = Math.cos(dir) * speed;
           ndy = Math.sin(dir) * speed;
           this.dx = lerp(this.dx, ndx, 0.5);
@@ -534,12 +603,13 @@
       this.x += this.dx;
       this.y += this.dy;
       this.updateGridCoordsFromXY();
-      if (!this.route && Math.random() < 0.02) {
-        this.reroute();
+      if (this.rage && (tower = world.checkGridObj(world.towers, this.gridX, this.gridY))) {
+        tower.damage();
       }
       if (this.gridX == world.heart.gridX && this.gridY == world.heart.gridY) {
         this.dead = true;
         world.heart.damage();
+        this.spawner.pool.push(this.attributes);
       }
       this.lastTime = time;
     };
@@ -563,14 +633,19 @@
       this.route = route;
     };
     prototype.damage = function(val){
+      var n;
       if (this.health <= 0) {
         return;
       }
       this.health -= val;
       this.damageBlip = true;
       if (this.health <= 0) {
-        world.credits++;
-        return this.dead = true;
+        n = 2 + 0 | Math.ceil(this.maxHealth / 75);
+        world.credits += n;
+        this.dead = true;
+        return playSound("kill");
+      } else {
+        return playSound("ammo-hit");
       }
     };
     return Enemy;
@@ -579,24 +654,40 @@
     Shot.displayName = 'Shot';
     var prototype = extend$(Shot, superclass).prototype, constructor = Shot;
     function Shot(x, y, fillStyle, attributes, target){
-      var r, range;
+      var r, range, bSpeed;
       this.x = x;
       this.y = y;
       this.fillStyle = fillStyle;
       this.attributes = attributes;
-      r = Math.atan2(target.y - this.y, target.x - this.x);
+      this.target = target;
+      r = Math.atan2(this.target.y - this.y, this.target.x - this.x);
       this.dx = Math.cos(r) * this.attributes.ammoSpeed;
       this.dy = Math.sin(r) * this.attributes.ammoSpeed;
       this.initialX = this.x;
       this.initialY = this.y;
       range = this.attributes.ammoRange;
       this.rangeSq = range * range;
-      this.size = 0 | Math.max(1, (this.attributes.ammoSpeed * 0.3) * 1.0 / (this.attributes.ammoDamage * 3));
+      bSpeed = this.attributes.ammoSpeed * Math.max(1, Math.sqrt(this.attributes.ammoDamage * 0.25));
+      this.size = Math.max(2, Math.min(7, bSpeed)) * 0.6;
+      this.decel = lerp(1.0, 0.95, this.attributes.ammoDeceleration);
+      this.life = 200;
     }
     prototype.step = function(){
-      var idx, idy, i$, ref$, len$, en, dx, dy, gridX, gridY, obj;
+      var dir, gridX, gridY, idx, idy, i$, ref$, len$, en, dx, dy, size, obj;
       this.x += this.dx;
       this.y += this.dy;
+      this.dx *= this.decel;
+      this.dy *= this.decel;
+      if (this.attributes.homingAmmo && !this.target.dead) {
+        dir = Math.atan2(this.target.y - this.y, this.target.x - this.x);
+        this.dx = lerp(Math.cos(dir) * this.attributes.ammoSpeed, this.dx, 0.2);
+        this.dy = lerp(Math.sin(dir) * this.attributes.ammoSpeed, this.dy, 0.2);
+      }
+      if (!this.life-- || Math.abs(this.dx + this.dy) < 0.1) {
+        this.dead = true;
+      }
+      gridX = 0 | this.x / 32;
+      gridY = 0 | this.y / 32;
       idx = this.x - this.initialX;
       idy = this.y - this.initialY;
       if (idx * idx + idy * idy >= this.rangeSq) {
@@ -604,19 +695,21 @@
       }
       for (i$ = 0, len$ = (ref$ = world.creeps).length; i$ < len$; ++i$) {
         en = ref$[i$];
+        if (en.gridY != gridY) {
+          continue;
+        }
         dx = this.x - en.x;
         dy = this.y - en.y;
-        if (dx * dx + dy * dy < en.actualSize * en.actualSize) {
+        size = Math.max(3, en.actualSize);
+        if (dx * dx + dy * dy < size * size) {
           en.damage(this.attributes.ammoDamage);
           if (this.attributes.slowingAmmo) {
-            en.actualSpeed *= 0.98;
+            en.actualSpeed *= 0.95;
           }
           this.dead = true;
           break;
         }
       }
-      gridX = 0 | this.x / 32;
-      gridY = 0 | this.y / 32;
       for (i$ = 0, len$ = (ref$ = world.objs).length; i$ < len$; ++i$) {
         obj = ref$[i$];
         if (obj.blocking) {
@@ -633,7 +726,7 @@
       ctx.strokeStyle = "white";
       ctx.fillStyle = this.fillStyle;
       ctx.save();
-      ctx.rotate(time * this.speed);
+      ctx.rotate(time * this.attributes.ammoSpeed);
       ctx.rect(-this.size, -this.size, this.size * 2, this.size * 2);
       ctx.fill();
       ctx.stroke();
@@ -673,7 +766,7 @@
       }
       return neighbors;
     };
-    prototype._checkGridObj = function(arrGridObjs, gridX, gridY, blockingOnly){
+    prototype.checkGridObj = function(arrGridObjs, gridX, gridY, blockingOnly){
       var i$, len$, obj;
       blockingOnly == null && (blockingOnly = false);
       for (i$ = 0, len$ = arrGridObjs.length; i$ < len$; ++i$) {
@@ -691,10 +784,10 @@
       if (!validGridCoords(gridX, gridY)) {
         return false;
       }
-      if (this._checkGridObj(this.towers, gridX, gridY)) {
+      if (this.checkGridObj(this.towers, gridX, gridY)) {
         return false;
       }
-      if (this._checkGridObj(this.objs, gridX, gridY, true)) {
+      if (this.checkGridObj(this.objs, gridX, gridY, true)) {
         return false;
       }
       return true;
@@ -703,10 +796,10 @@
       if (!validGridCoords(gridX, gridY)) {
         return false;
       }
-      if (this._checkGridObj(this.towers, gridX, gridY)) {
+      if (this.checkGridObj(this.towers, gridX, gridY)) {
         return false;
       }
-      if (this._checkGridObj(this.objs, gridX, gridY)) {
+      if (this.checkGridObj(this.objs, gridX, gridY)) {
         return false;
       }
       return true;
@@ -721,6 +814,7 @@
       }
       tower.setGridCoords(gridX, gridY);
       this.towers.push(tower);
+      playSound("place");
       for (i$ = 0, len$ = (ref$ = this.creeps).length; i$ < len$; ++i$) {
         creep = ref$[i$];
         results$.push(creep.reroute());
@@ -749,6 +843,9 @@
     prototype.draw = function(ctx){
       var drawables, i$, len$, d, r, i, len1$, p, results$ = [];
       drawables = [].concat(this._process(this.creeps), this._process(this.towers), this._process(this.objs), this._process(this.ammo));
+      if (this.heart.health <= 0) {
+        this.gameOver = true;
+      }
       drawables.sort(function(a, b){
         return a.y - b.y;
       });
@@ -774,10 +871,23 @@
       }
       return results$;
     };
+    prototype.createBoulder = function(){
+      var boulder, tries, x, y;
+      boulder = new Boulder();
+      for (tries = 0; tries < 30; ++tries) {
+        x = irand(3, gridMaxX - 3);
+        y = irand(0, gridMaxY - 1);
+        if (this.isPlaceable(x, y)) {
+          boulder.setGridCoords(x, y);
+          this.objs.push(boulder);
+          return boulder;
+        }
+      }
+    };
     prototype.newGame = function(){
-      var x, spawner, heart, i, boulder, y;
+      var x, spawner, heart, i;
       this.credits = 15;
-      for (x = 0; x < 5; ++x) {
+      for (x = 0; x < 7; ++x) {
         this.towerTray.push(new Tower(towerGenome.initialize()));
       }
       spawner = new Spawner();
@@ -787,16 +897,7 @@
       heart.setGridCoords(gridMaxX - 1, 0 | Math.random() * gridMaxY - 1);
       this.objs.push(heart);
       for (i = 0; i < 10; ++i) {
-        boulder = new Boulder();
-        x = irand(3, gridMaxX - 3);
-        y = irand(0, gridMaxY - 1);
-        for (;;) {
-          if (this.isPlaceable(x, y)) {
-            boulder.setGridCoords(x, y);
-            break;
-          }
-        }
-        this.objs.push(boulder);
+        this.createBoulder();
       }
     };
     prototype.sellTower = function(tower){
@@ -804,11 +905,32 @@
       for (i = 0, len$ = (ref$ = this.towers).length; i < len$; ++i) {
         cTower = ref$[i];
         if (tower == cTower) {
+          tower.onStage = false;
           this.towers.splice(i, 1);
           this.credits += 3;
+          playSound("sell");
           break;
         }
       }
+    };
+    prototype.cloneTower = function(tower){
+      var evTower;
+      playSound("clone");
+      evTower = new Tower(towerGenome.evolve(tower.attributes, tower.attributes, this.towerMutationRate));
+      this.towerTray.push(evTower);
+      evTower.generation = tower.generation;
+      this.credits -= 10;
+    };
+    prototype.totalEnemiesLeft = function(){
+      var n, i$, ref$, len$, obj;
+      n = 0;
+      for (i$ = 0, len$ = (ref$ = this.objs).length; i$ < len$; ++i$) {
+        obj = ref$[i$];
+        if (obj.enemiesLeft) {
+          n += obj.enemiesLeft;
+        }
+      }
+      return n;
     };
     return World;
   }());
@@ -839,7 +961,8 @@
     reloadSpeed: new FloatGene(),
     acquisitionSpeed: new FloatGene(),
     maxRange: new FloatGene(),
-    slowingAmmo: new FloatGene()
+    slowingAmmo: new FloatGene(),
+    homingAmmo: new FloatGene()
   });
   traitNames = {
     maxAmmo: "Ammo/reload",
@@ -850,6 +973,7 @@
     ammoDamage: "Ammo Damage",
     ammoSpeed: "Ammo Speed",
     ammoRange: "Ammo Range",
+    ammoDeceleration: "Ammo Deceleration",
     dps: "DPS"
   };
   enemyGenome = new Genome({
@@ -906,6 +1030,9 @@
           }
         }
       }
+      if (worldSelected && !worldSelected.onStage) {
+        worldSelected = null;
+      }
       worldSelectedChanged = false;
       canEvolve = true;
       if (world.towerTray.length >= 10) {
@@ -946,7 +1073,9 @@
             ctx.stroke();
             if (mouse.b) {
               if (canEvolve && worldSelected && worldSelected != tower) {
+                playSound("evolve");
                 evTower = new Tower(towerGenome.evolve(worldSelected.attributes, tower.attributes, world.towerMutationRate));
+                evTower.generation = Math.max(worldSelected.generation, tower.generation) + 1;
                 world.credits -= 5;
                 world.towerTray.push(evTower);
                 worldSelected = null;
@@ -987,9 +1116,13 @@
       ctx.stroke();
       ctx.beginPath();
       ctx.fillStyle = "silver";
-      ctx.font = "14px Segoe UI, sans-serif";
-      ctx.fillText("Credits: " + world.credits, 820, 570);
-      ctx.fillText("Core Health: " + world.heart.life, 820, 590);
+      ctx.font = "14px " + fontStack;
+      if (world.gameOver) {
+        ctx.fillText("GAME OVER - YOUR CORE HAS BEEN NOMMED.", 820, 530);
+      }
+      ctx.fillText("Credits: " + world.credits, 820, 550);
+      ctx.fillText("Core Health: " + world.heart.life, 820, 570);
+      ctx.fillText("Enemies Left: " + world.totalEnemiesLeft(), 820, 590);
       if (world.towerTray.length == 0) {
         ctx.fillText("Click on two towers to evolve them!", 16, 570);
       } else {
@@ -1019,11 +1152,12 @@
     };
     drawInspect = function(){
       var y, lines, key, ref$, val, txval, i$, len$, text;
-      ctx.font = "14px Segoe UI, sans-serif";
+      ctx.font = "14px " + fontStack;
       ctx.beginPath();
       ctx.fillStyle = "white";
       y = 20;
       lines = [];
+      lines.push("Generation " + inspectTower.generation);
       for (key in ref$ = inspectTower.actual) {
         val = ref$[key];
         if (key = traitNames[key]) {
@@ -1076,9 +1210,15 @@
       if (inspectTower.actual.slowingAmmo) {
         lines.push("Ammo slows enemies");
       }
+      if (inspectTower.actual.homingAmmo) {
+        lines.push("Ammo homes on enemies");
+      }
       if (inspectTower.onStage) {
         lines.push("");
-        lines.push("[S] Sell tower");
+        lines.push("[S] Sell tower (+3 CR)");
+        if (world.credits >= 10) {
+          lines.push("[C] Clone tower (-10 CR)");
+        }
       }
       for (i$ = 0, len$ = lines.length; i$ < len$; ++i$) {
         text = lines[i$];
@@ -1100,7 +1240,7 @@
         drawInspect();
       }
       if (tooltipText) {
-        ctx.font = "12px Segoe UI, sans-serif";
+        ctx.font = "12px " + fontStack;
         w = ctx.measureText(tooltipText).width;
         ttX = mouse.x + 10;
         if (ttX + w + 5 > 800) {
@@ -1139,7 +1279,10 @@
     };
     keyPress = function(keyCode){
       if (keyCode == 115 && inspectTower && inspectTower.onStage) {
-        return world.sellTower(inspectTower);
+        world.sellTower(inspectTower);
+      }
+      if (keyCode == 99 && inspectTower && world.credits >= 10 && world.towerTray.length < 10) {
+        return world.cloneTower(inspectTower);
       }
     };
     step = function(){
@@ -1159,8 +1302,8 @@
       ctx = canvas.getContext("2d");
       handleMove = function(into, event){
         var gx, gy;
-        into.x = event.offsetX;
-        into.y = event.offsetY;
+        into.x = event.offsetX || event.clientX;
+        into.y = event.offsetY || event.clientY;
         gx = 0 | into.x / 32;
         gy = 0 | into.y / 32;
         if (validGridCoords(gx, gy)) {
@@ -1174,30 +1317,42 @@
         mouse.b = true;
         handleMove(mouse, event);
         handleMove(mouse.down, event);
-      });
+      }, false);
       canvas.addEventListener("mouseup", function(event){
         mouse.b = false;
         handleMove(mouse, event);
-      });
+      }, false);
       canvas.addEventListener("mousemove", function(event){
         handleMove(mouse, event);
-      });
+      }, false);
       canvas.addEventListener("click", function(event){
         handleMove(mouse, event);
         click();
-      });
+      }, false);
       document.addEventListener("keypress", function(event){
-        console.log(event.keyCode);
-        keyPress(event.keyCode);
-      });
+        keyPress(event.keyCode || event.charCode);
+      }, false);
+      loadSound("core-hit", "core-hit2.wav");
+      loadSound("ammo-hit", "ammo-hit.wav");
+      loadSound("kill", "kill.wav");
+      loadSound("tower-hurt", "tower-hurt.wav");
+      loadSound("place", "place.wav");
+      loadSound("shoot", "shoot.wav");
+      loadSound("evolve", "evolve.wav");
+      loadSound("clone", "clone.wav");
+      loadSound("sell", "sell.wav");
       newGame();
       return setInterval(step, 1000 / 20.0);
     };
     window.EvoTD = {
       init: init,
       debug: debug,
+      newGame: newGame,
       getWorld: function(){
         return world;
+      },
+      setSounds: function(it){
+        return enableSound = !!it;
       }
     };
   }.call(this, document, window));

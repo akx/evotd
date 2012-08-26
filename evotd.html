@@ -4,12 +4,27 @@
 	<meta charset="UTF-8">
 	<title>EvoTD</title>
 	<script type="text/javascript" src="evotd.js"></script>
-	<style type="text/css">body{margin:0}</style>
+	<style type="text/css">
+	body,button{font:12pt/14pt Corbel,Segoe UI,sans-serif}
+	body{margin:0;background:#000;color:#FFF}
+	button{background:#000;border:1px dotted silver;color:#FFF}
+	a{color:#FFF;}
+	#cr {margin: 0.5em}
+	</style>
 </head>
 <body>
-<canvas id="canvas" width="1024" height="600" style="border:1px solid pink"></canvas>
-<script type="text/javascript">
-setTimeout(function() { EvoTD.init(); }, 50)</script>	
+<canvas id="canvas" width="1024" height="600"></canvas><br>
+<button onclick="if(confirm('Restart?')) EvoTD.newGame();">New Game</button>
+<button onclick="EvoTD.setSounds(true);">Sound On</button>
+<button onclick="EvoTD.setSounds(false);">Sound Off</button><br>
+<br>
+<div id="cr">
+	EvoTD &ndash; by <a href="http://twitter.com/akx">@akx</a> / <tt title="LD username">akx</tt> for Ludum Dare 24.<br>
+	Works on modern Chromes and Firefoxes. <a href="evotd.co">Source.</a><br>
+	This game makes no guarantees of even trying to be fair. But it's sorta fun to play.<br>
+	Btw: The enemy also evolves.
+</div>
+<script type="text/javascript">setTimeout(function() { EvoTD.init(); }, 50)</script>
 </body>
 </html>
 
