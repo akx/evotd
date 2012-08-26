@@ -10,6 +10,11 @@ rand = (a, b) -> (a + Math.random() * (b - a))
 irand = (a, b) -> 0 | (a + Math.random() * (b - a))
 pick = (arr) -> arr[irand(0, arr.length)]
 
+rangeCheck = (p1, p2, maxRange) ->
+	dx = p1.x - p2.x
+	dy = p1.y - p2.y
+	return ((dx * dx) + (dy * dy) < (maxRange * maxRange))
+
 
 lissajous = (ctx, time, ljParams) ->
 	w = Math.cos(time * ljParams.wd)
@@ -38,7 +43,7 @@ makeAstarNode = (x, y) -> {x, y, id: "#x,#y"}
 
 
 
-aStar = (start, goal, getNeighbors, dist = null, heuristic = null) ->
+aStar = (start, goal, getNeighbors) ->
 	closed = {}
 	open = []
 	openIds = {}
@@ -46,8 +51,8 @@ aStar = (start, goal, getNeighbors, dist = null, heuristic = null) ->
 	gScore = {}
 	fScore = {}
 
-	heuristic = heuristic or (node1, node2) -> Math.abs(node1.x - node2.x) + Math.abs(node1.y - node2.y)
-	dist = dist or (node1, node2) ->
+	heuristic = (node1, node2) -> (Math.abs(node1.x - node2.x) + Math.abs(node1.y - node2.y))
+	dist = (node1, node2) ->
 		dx = (node1.x - node2.x)
 		dy = (node1.y - node2.y)
 		return Math.sqrt(dx * dx + dy * dy)
@@ -147,24 +152,131 @@ class GridObject
 		@gridY = 0 | (@y / 32)
 
 class Tower extends GridObject
-	(@attributes) -> super!
+	(@attributes) ->
+		super!
+		@nextReload = 0
+		@nextShot = 0
+		@nextAcquisition = 0
+
+		@actual = {
+			maxAmmo: 0 | lerp(1, 50, @attributes.reloadAmmo)
+			shotInterval: 1.0 / lerp(3, 20, @attributes.shootSpeed)
+			acqInterval: lerp(4, 0.3, @attributes. acquisitionSpeed)
+			maxRange: 0 | lerp(48, 200, @attributes.maxRange)
+			reloadTime: lerp(1, 5, @attributes.reloadSpeed),
+			ammoDamage: lerp(1, 35, @attributes.ammoDamage),
+			ammoSpeed: lerp(3, 20, @attributes.ammoSpeed),
+			ammoRange: lerp(80, 300, @attributes.ammoRange),
+			slowingAmmo: (@attributes.slowingAmmo > 0.75)
+		}
+		@actual.dps = @actual.ammoDamage / (1.0 / @actual.shotInterval)
+		@depletionTime = @actual.maxAmmo * @actual.shotInterval + 0.1
+		@reload!
+		hue = 0 | (@attributes.hue * 360)
+		@fillStyle = "hsl(#hue,100%,50%)"
+
+	reload: ->
+		@ammo = @actual.maxAmmo
+		@nextShot = 0
+		@nextReload = 0
+		@reloading = false
+	
+	beginReload: ->	
+		@reloading = true
+		@nextReload = time + @depletionTime + @actual.reloadTime
+
+	reacquire: ->
+		@unacquire!
+
+		closestEnemy = null
+		closestDist = 0
+		maxDistSq = (@actual.maxRange * @actual.maxRange)
+		for enemy of world.creeps then
+			dx = @x - enemy.x
+			dy = @y - enemy.y
+			distSq = (dx * dx) + (dy * dy)
+			if (not closestEnemy or distSq < closestDist) and distSq < maxDistSq then
+				closestDist = distSq
+				closestEnemy = enemy
+		@acquiredEnemy = closestEnemy
+		@nextShot = time + @actual.shotInterval
+		#console.log "Tower acq'd: ", @acquiredEnemy
+
+	unacquire: !->
+		@acquiredEnemy = null
+		@nextAcquisition = time + @actual.acqInterval
+
+
+
+	step: ->
+		@onStage = true
+		if time >= @nextAcquisition then
+			@reacquire!
+
+		if @ammo <= 0 
+			if @nextReload <= 0 then
+				@beginReload!
+			else if time >= @nextReload then
+				@reload!
+
+		if @acquiredEnemy then
+			if not rangeCheck(@, @acquiredEnemy, @actual.maxRange) then
+				@unacquire!
+			else if @ammo > 0 and time >= @nextShot then
+				@nextShot = time + @actual.shotInterval
+				if @acquiredEnemy.dead then
+					@acquiredEnemy = null
+				else
+					@shoot @acquiredEnemy
+					@ammo --
+
+	shoot: (target) ->
+		shot = new Shot(@x, @y, @fillStyle, @actual, target)
+		world.ammo.push shot
+
 
 	draw: !(ctx) ->
-		hue = 0 | (@attributes.hue * 360)
+
 		pxHeight = 8 + (@attributes.height * 48)
 		baseWidth = 3 + (@attributes.baseWidth * 27)
 		topWidth = 3 + (@attributes.topWidth * 17)
 
+		ctx.font = "12px Segoe UI, sans-serif"
 
-		ctx.beginPath!
-		ctx.fillStyle = "hsl(#hue,100%,50%)"
+		
 		ctx.strokeStyle = "transparent"		
 		for i from 0 til pxHeight by 3
-			sz = lerp topWidth, baseWidth, (1.0 - (i / pxHeight))
+			alpha = (1.0 - (i / pxHeight))
+			alpha = Math.pow(alpha, @attributes.form * 2)
+			sz = lerp topWidth, baseWidth, alpha
+			hue = lerp @attributes.hue * 360, @attributes.hueTop * 360, alpha
+			ctx.fillStyle = "hsl(#hue, 100%, 50%)"
 			#xo = Math.cos (i) * 5 * @attributes.form
 			#yo = Math.sin (i * @attributes.form) * 3
+			ctx.beginPath!
 			ctx.arc 0, -i, sz / 2, 0, 6.282
-		ctx.fill!
+			ctx.fill!
+
+		if @onStage then
+
+			if @ammo > 0 then
+				ctx.beginPath!
+				abw = lerp(0, 32, @ammo / @actual.maxAmmo)
+				ctx.rect -16, 14, abw, 2
+				ctx.fill!
+			
+			
+			ctx.fillStyle = "white"
+
+			if @reloading and (time * 2) & 1 then
+				ctx.beginPath!
+				ctx.fillText "R", -2, 0
+			if not @reloading and not @acquiredEnemy then
+				ctx.beginPath!
+				ctx.fillText "?", -2, 0
+
+
+
 
 class Spawner extends GridObject
 	->
@@ -173,7 +285,7 @@ class Spawner extends GridObject
 		@figureOutNextSpawn!
 
 	figureOutNextSpawn: !->
-		@nextSpawn = time + rand(1, 5)
+		@nextSpawn = time + rand(0.5, 4)
 
 	draw: !(ctx) ->
 		ctx.save!
@@ -186,14 +298,13 @@ class Spawner extends GridObject
 		ctx.restore!
 
 	step: !->
-		if @nextSpawn and time >= @nextSpawn then
-			#@figureOutNextSpawn!
-			@nextSpawn = 0
+		if not world.gameOver and @nextSpawn and time >= @nextSpawn then
+			@figureOutNextSpawn!
 			@spawn!
 
 	spawn: !->
 		if world.creeps.length then
-			genome = enemyGenome.evolve pick(world.creeps), pick(world.creeps), world.mutationRate
+			genome = enemyGenome.evolve pick(world.creeps).attributes, pick(world.creeps).attributes, world.enemyMutationRate
 		else
 			genome = enemyGenome.initialize!
 		creep = new Enemy(genome)
@@ -205,16 +316,43 @@ class Heart extends GridObject
 	->
 		super!
 		@ljParams = genLissajousParams!
+		@life = @maxLife = 50
+		@damageBlip = 0
+
+	damage: !->
+		@life --
+		@damageBlip = 15
 
 	draw: !(ctx) ->
+		ctx.strokeStyle = "lime"
+		if @life < @maxLife * 0.5 and (time * 3 % 1) < 0.5 then 
+			ctx.strokeStyle = "orange" 
+		if @damageBlip > 0 then
+			@damageBlip--
+			if (time * 5 % 1) < 0.5 then ctx.strokeStyle = "white"
+
 		ctx.save!
 		ctx.rotate -time
 		ctx.beginPath!
-		ctx.strokeStyle = "lime"
 		ctx.lineWidth = 1
 		lissajous ctx, time, @ljParams
 		ctx.stroke!
 		ctx.restore!
+		if @life < @maxLife then
+			ctx.save!
+			ctx.rotate time * 3
+			ctx.beginPath!
+			ctx.lineWidth = 1
+			ctx.arc 0, 0, 8 + Math.cos(time) * 2, 0, lerp(0, 6.282, @life / @maxLife)
+			ctx.stroke!
+			ctx.restore!
+
+		#ctx.fillStyle = "white"
+		#ctx.font = "10px bold Segoe UI, sans-serif"
+		#text = "#{@life}"
+		#w = ctx.measureText(text).width
+		#ctx.fillText text, w*-0.5, 0
+
 
 class Boulder extends GridObject
 	->
@@ -239,28 +377,65 @@ class Enemy extends GridObject
 	(@attributes) ->
 		super!
 		@route = null
+		@actualSpeed = (lerp 1, 7, @attributes.speed) * Math.sqrt(@attributes.health)
+		@actualSize = lerp(6, 32, @attributes.size) / 2
+		@maxHealth = @health = 0 | lerp(30, 500, @attributes.health)
+		@dx = @dy = 0
+		console.log @attributes
+
 
 	draw: !(ctx) ->
+		hue = 0 | (@attributes.hue * 360)
+		
+		r = (@attributes.hue - 0.5) * time * (1 + @attributes.speed) * 10
+		s = "hsl(#hue, 30%, 50%)"
 		ctx.beginPath!
-		ctx.fillStyle = "yellow"
-		ctx.rect -3, -3, 6, 6
-		ctx.fill!
+		if @damageBlip then
+			s = "white"
+			@damageBlip = false
+		ctx.fillStyle = ctx.strokeStyle = s
+		ctx.lineWidth = 2
+		ctx.arc 0, 0, @actualSize, r, r + 4.7
+		ctx.stroke!
+
+		if @health > 0 and @health < @maxHealth then
+			ctx.beginPath!
+			abw = lerp(0, 32, @health / @maxHealth)
+			ctx.rect -16, 14, abw, 2
+			ctx.fill!
+
 
 	step: !->
 		lastTime = (@lastTime || time)
 		delta = (time - lastTime)
-		speed = (@attributes.speed * 4)
+		
 
 		if @route and @route.length then
 			nextNode = @route[0]
-			dx = @x - nextNode.worldX
-			dy = @y - nextNode.worldY
-			if (dx * dx + dy * dy) < (5 * 5) then
-				@route.unshift!
+			dx = nextNode.worldX - @x
+			dy = nextNode.worldY - @y
+			dist2 = (dx * dx + dy * dy)
+			if dist2 < (5 * 5) then
+				@route.shift!
 			else
 				dir = Math.atan2(dy, dx)
-				@x += Math.cos(dir) * speed
-				@y += Math.sin(dir) * speed
+				speed = Math.min(Math.sqrt(dist2), @actualSpeed)
+				ndx = Math.cos(dir) * speed
+				ndy = Math.sin(dir) * speed
+				@dx = lerp(@dx, ndx, 0.5)
+				@dy = lerp(@dy, ndy, 0.5)
+
+		@x += @dx
+		@y += @dy
+		@updateGridCoordsFromXY!
+
+		if not @route and Math.random() < 0.02 then
+			@reroute!
+
+		if @gridX == world.heart.gridX and @gridY == world.heart.gridY then
+			@dead = true
+			world.heart.damage!
+
 		@lastTime = time
 
 	reroute: ! ->
@@ -268,13 +443,80 @@ class Enemy extends GridObject
 		start = makeAstarNode @gridX, @gridY
 		end = makeAstarNode world.heart.gridX, world.heart.gridY
 		route = aStar start, end, (world.~getAstarNeighbors)
-		route = route || [end] # Fine! SMASH.
+		if not route
+			console.log "COULD NOT FIND ROUTE", start, end
+			@route = null
+			return
+			
+			#route = [start]
+		route.push end
 		for point of route then
-			point.worldX = point.x + irand(4, 28)
-			point.worldY = point.y + irand(4, 28)
+			point.worldX = point.x * 32 + irand(4, 32 - 4)
+			point.worldY = point.y * 32 + irand(4, 32 - 4)
 
 		@route = route
 
+	damage: (val) ->
+		return if @health <= 0
+		@health -= val
+		@damageBlip = true
+		if @health <= 0 then
+			world.credits ++
+			@dead = true
+
+
+class Shot extends GridObject
+	(@x, @y, @fillStyle, @attributes, target) ->
+		r = Math.atan2(target.y - @y, target.x - @x)
+		@dx = Math.cos(r) * @attributes.ammoSpeed
+		@dy = Math.sin(r) * @attributes.ammoSpeed
+		@initialX = @x
+		@initialY = @y
+		range = @attributes.ammoRange
+		@rangeSq = range * range
+		@size = 0 | Math.max(1, (@attributes.ammoSpeed * 0.3) * 1.0 / (@attributes.ammoDamage * 3))
+
+	step: !->
+		@x += @dx
+		@y += @dy
+
+		idx = (@x - @initialX)
+		idy = (@y - @initialY)
+
+		if (idx * idx) + (idy * idy) >= @rangeSq then
+			@dead = true
+
+		for en of world.creeps
+			dx = @x - en.x
+			dy = @y - en.y
+
+			if (dx * dx) + (dy * dy) < (en.actualSize * en.actualSize) then
+				en.damage @attributes.ammoDamage
+				if @attributes.slowingAmmo then
+					en.actualSpeed *= 0.98
+				@dead = true
+				break
+
+		gridX = 0 | (@x / 32)
+		gridY = 0 | (@y / 32)
+
+		for obj of world.objs then if obj.blocking
+			if gridX == obj.gridX and gridY == obj.gridY then
+				@dead = true
+				break
+
+	draw: !(ctx) ->
+		ctx.beginPath!
+		ctx.lineWidth = 1
+		ctx.strokeStyle = "white"
+		ctx.fillStyle = @fillStyle
+		ctx.save!
+		ctx.rotate(time * @speed)
+
+		ctx.rect -@size, -@size, @size*2, @size*2
+		ctx.fill!
+		ctx.stroke!
+		ctx.restore!
 
 
 
@@ -285,30 +527,48 @@ class World
 		@ammo = []
 		@towerTray = []
 		@objs = []
-		@mutationRate = 0.02
+		@enemyMutationRate = 0.09
+		@towerMutationRate = 0.04
+
 		@heart = null
+		@credits = 0
+		@gameOver = false
+
+
 
 
 	getAstarNeighbors: (node) ->
-		{x, y} = node
 		neighbors = []
-		if x > 0 then neighbors.push(makeAstarNode(x - 1, y))
-		if y > 0 then neighbors.push(makeAstarNode(x, y - 1))
-		if x < gridMaxX then neighbors.push(makeAstarNode(x + 1, y))
-		if y < gridMaxY then neighbors.push(makeAstarNode(x, y + 1))
-
-		w = @
-		neighbors = neighbors.filter (node) -> w.isPlaceable(node.x, node.y)
+		for ndx from -1 to +1
+			for ndy from -1 to +1
+				if ndx == 0 and ndy == 0
+					then continue
+				nx = node.x + ndx
+				ny = node.y + ndy
+				if @isRoutable(nx, ny) then
+					neighbors.push(makeAstarNode(nx, ny))
 		return neighbors
 	
 
 	_checkGridObj: (arrGridObjs, gridX, gridY, blockingOnly = false) ->
-		for obj of arrGridObjs then if obj.gridX == gridX and obj.gridY == gridY and (not blockingOnly or (blockingOnly and obj.blocking)) then return obj
+		for obj of arrGridObjs then
+			if blockingOnly and not !!obj.blocking then continue
+			if obj.gridX == gridX and obj.gridY == gridY then
+				return obj
+		return false
 
+	isRoutable: (gridX, gridY) ->
+		return false unless validGridCoords(gridX, gridY)
+		return false if @_checkGridObj(@towers, gridX, gridY)
+		return false if @_checkGridObj(@objs, gridX, gridY, true)
+		return true
 
 
 	isPlaceable: (gridX, gridY) ->
-		return (!@_checkGridObj(@towers, gridX, gridY) and !@_checkGridObj(@objs, gridX, gridY, true))
+		return false unless validGridCoords(gridX, gridY)
+		return false if @_checkGridObj(@towers, gridX, gridY)
+		return false if @_checkGridObj(@objs, gridX, gridY)
+		return true
 
 	placeTower: (tower, gridX, gridY) ->
 		for i from 0 til @towerTray.length
@@ -325,8 +585,11 @@ class World
 		while i < aDrawables.length
 			d = aDrawables[i]
 			d.step?!
+			if d.x < 0 or d.y < 0 or d.x > 800 or d.y > 544 then
+				#console.log "#d out of boundaries"
+				d.dead = true
 			if d.dead then
-				console.log "Killing #d"
+				#console.log "Killing #d"
 				aDrawables.splice i, 1
 				continue
 			i += 1
@@ -334,9 +597,9 @@ class World
 
 	draw: (ctx) ->
 		drawables = [].concat(
+			@_process(@creeps),
 			@_process(@towers),
 			@_process(@objs),
-			@_process(@creeps),
 			@_process(@ammo)
 		)
 
@@ -347,7 +610,20 @@ class World
 			d.draw ctx
 			ctx.translate -d.x, -d.y
 
+			if debug.routes then
+				r = d.route
+				ctx.lineWidth = 1
+				ctx.strokeStyle = "rgba(255,0,0,0.6)"
+				if r then
+					ctx.beginPath!
+					ctx.moveTo d.x, d.y
+					for p, i of r
+						ctx.lineTo p.worldX, p.worldY
+					ctx.stroke!
+
 	newGame: !->
+		@credits = 15
+
 		for x from 0 til 5 
 			@towerTray.push new Tower(towerGenome.initialize!)
 		spawner = new Spawner()
@@ -358,7 +634,7 @@ class World
 		heart.setGridCoords(gridMaxX - 1, 0 | (Math.random() * gridMaxY) - 1)		
 		@objs.push heart
 
-		for i from 0 til 5
+		for i from 0 til 10
 			boulder = new Boulder()
 			x = irand 3, gridMaxX - 3
 			y = irand 0, gridMaxY - 1
@@ -368,6 +644,12 @@ class World
 					break
 			@objs.push boulder
 
+	sellTower: !(tower)->
+		for cTower, i of @towers then
+			if tower == cTower then
+				@towers.splice(i, 1)
+				@credits += 3
+				break
 
 
 validGridCoords = (gridX, gridY) -> (gridX >= 0 and gridX < gridMaxX and gridY >= 0 and gridY < gridMaxY)
@@ -375,6 +657,7 @@ gridMaxX = 25
 gridMaxY = 17
 world = null
 time = 0
+debug = {-routes}
 
 towerGenome = new Genome {
 	height:				new FloatGene()
@@ -383,14 +666,37 @@ towerGenome = new Genome {
 	form:				new FloatGene()
 	range:				new FloatGene()
 	hue:				new FloatGene()
+	hueTop:				new FloatGene()
 	ammoSpeed:			new FloatGene()
+	ammoDamage:			new FloatGene()
+	ammoRange:			new FloatGene()
+	ammoDeceleration:	new FloatGene()
+	shootSpeed:			new FloatGene()
+	reloadAmmo:			new FloatGene()
 	reloadSpeed:		new FloatGene()
 	acquisitionSpeed:	new FloatGene()
+	maxRange:			new FloatGene()
+	slowingAmmo:		new FloatGene()
+}
+
+traitNames = {
+	maxAmmo: "Ammo/reload",
+	shotInterval: "Shot Speed",
+	acqInterval: "Acquisition Speed",
+	maxRange: "Acquisition Range",
+	reloadTime: "Reload Time",
+	ammoDamage: "Ammo Damage",
+	ammoSpeed: "Ammo Speed",
+	ammoRange: "Ammo Range",
+	dps: "DPS",
+
+
 }
 
 enemyGenome = new Genome {
 	speed:				new FloatGene()
 	health:				new FloatGene()
+	hue:				new FloatGene()
 	size:				new FloatGene()
 	flying:				new FloatGene()
 }
@@ -404,13 +710,13 @@ let document, window
 	traySelected = null
 	worldSelected = null
 	tooltipText = null
+	inspectTower = null
 	
 
 	setTooltip = !->
 		tooltipText := "#it"
 
-	drawScene = ->
-
+	drawGrid = ->
 		ctx.beginPath!
 		ctx.strokeStyle = "purple"
 		ctx.lineWidth = 1
@@ -422,6 +728,10 @@ let document, window
 			ctx.lineTo 800, y + 0.5
 		ctx.stroke!
 
+
+	drawScene = ->
+
+		#drawGrid!
 		if traySelected then
 			if validGridCoords(mouse.gridX, mouse.gridY) then
 				p = world.isPlaceable(mouse.gridX, mouse.gridY)
@@ -434,31 +744,57 @@ let document, window
 					setTooltip "Place tower"
 
 		worldSelectedChanged = false
-		canEvolve = (world.towerTray.length < 10)
+		canEvolve = true
+		if world.towerTray.length >= 10 then canEvolve = false; cantEvolveReason = "Too many towers in tray"
+		if world.credits < 5 then canEvolve = false; cantEvolveReason = "Not enough credits"
+		evolveTarget = null
 		if not traySelected then
 			for tower of world.towers then
 				if worldSelected == tower or tower.gridX == mouse.gridX and tower.gridY == mouse.gridY then
-					ctx.beginPath!
-					ctx.strokeStyle = (if worldSelected == tower then "magenta" else "purple")
+					inspectTower := tower
 					if worldSelected and worldSelected != tower then
 						if canEvolve then
+							evolveTarget = tower
 							ctx.strokeStyle = "magenta"
-							setTooltip "Evolve towers"
+							setTooltip "Evolve towers (5 CR)"
+							ctx.lineWidth = 1
+							ctx.beginPath!
+							for i from 0 til 3
+								ctx.moveTo tower.x + rand(-5, 5), tower.y + rand(-5, 5)
+								ctx.lineTo worldSelected.x + rand(-5, 5), worldSelected.y + rand(-5, 5)
+							ctx.stroke!
 						else
 							ctx.strokeStyle = "red"
-							setTooltip "Can't evolve, too many in tray"
+							setTooltip "Can't evolve: #cantEvolveReason"
+					ctx.beginPath!
+					ctx.strokeStyle = (if worldSelected == tower then "magenta" else "purple")
 
 					ctx.lineWidth = 4
 					ctx.rect tower.gridX * 32, tower.gridY * 32, 32, 32
 					ctx.stroke!
 					if mouse.b then
 						if canEvolve and worldSelected and worldSelected != tower then
-							evTower = new Tower(towerGenome.evolve(worldSelected.attributes, tower.attributes, world.mutationRate))
+							evTower = new Tower(towerGenome.evolve(worldSelected.attributes, tower.attributes, world.towerMutationRate))
+							world.credits -= 5
 							world.towerTray.push evTower
 							worldSelected := null
+							traySelected := evTower
 						else
 							worldSelected := tower
 							worldSelectedChanged = true
+
+		if evolveTarget then inspectTower := evolveTarget
+
+		if worldSelected then
+			ctx.strokeStyle = "silver"
+			ctx.lineWidth = 1
+			ctx.beginPath!
+			ctx.arc worldSelected.x, worldSelected.y, worldSelected.actual.maxRange, 0, 6.282
+			ctx.stroke!
+			ctx.strokeStyle = "gray"
+			ctx.beginPath!
+			ctx.arc worldSelected.x, worldSelected.y, worldSelected.actual.ammoRange, 0, 6.282
+			ctx.stroke!
 
 		world.draw ctx
 
@@ -469,32 +805,87 @@ let document, window
 		ctx.beginPath!
 		ctx.moveTo 0, 544
 		ctx.lineTo 800, 544
+		ctx.moveTo 800, 0
+		ctx.lineTo 800, 600
 		ctx.stroke!
+		ctx.beginPath!
+		ctx.fillStyle = "silver"
+		ctx.font = "14px Segoe UI, sans-serif"
+		ctx.fillText "Credits: #{world.credits}", 820, 570
+		ctx.fillText "Core Health: #{world.heart.life}", 820, 590
 
-		for tower, i of world.towerTray
-			ctx.save!
-			tx = 16 + i * 32
-			ctx.translate tx, 585
-			if mouse.x >= tx - 16 and mouse.x < tx + 16 and mouse.y > 544 or (traySelected == tower) then
-				if traySelected != tower then
-					setTooltip "Select tower to place"
-				if mouse.b then
-					traySelected := tower
-					worldSelected := null
-				ctx.beginPath!
-				ctx.strokeStyle = (if tower == traySelected then "white" else "magenta")
-				ctx.rect -15, -15, 30, 30
-				ctx.stroke!
-			tower.draw(ctx)
-			ctx.restore!
+		if world.towerTray.length == 0 then
+			ctx.fillText "Click on two towers to evolve them!", 16, 570
+		else
+			for tower, i of world.towerTray
+				ctx.save!
+				tx = 16 + i * 32
+				ctx.translate tx, 585
+				if mouse.x >= tx - 16 and mouse.x < tx + 16 and mouse.y > 544 or (traySelected == tower) then
+					if traySelected != tower then
+						setTooltip "Select tower to place"
+					if mouse.b then
+						traySelected := tower
+						worldSelected := null
+					ctx.beginPath!
+					ctx.strokeStyle = (if tower == traySelected then "white" else "magenta")
+					ctx.rect -15, -15, 30, 30
+					ctx.stroke!
+					inspectTower := tower
+				tower.draw(ctx)
+				ctx.restore!
+
+	drawInspect = !->
+		ctx.font = "14px Segoe UI, sans-serif"
+		ctx.beginPath!
+		ctx.fillStyle = "white"
+		y = 20
+		lines = []
+		for key, val in inspectTower.actual
+			if key = traitNames[key] then
+				txval = (if val == (0 | val) then "#val" else val.toFixed(2))
+				lines.push("#key: #txval")
+		lines.push ""
+		if inspectTower.actual.maxAmmo < 10 then lines.push "Low ammo"
+		if inspectTower.actual.reloadTime > 5 then lines.push "Slow reload"
+		if inspectTower.actual.maxRange < 50 then lines.push "Low range of acquisition"
+		if inspectTower.actual.acqInterval > 3 then lines.push "Slow acquisition"
+		if inspectTower.actual.ammoRange < 120 then lines.push "Low-range ammo"
+		if inspectTower.actual.ammoDamage < 12 then lines.push "Low damage ammo"
+		
+		if inspectTower.actual.shotInterval < 0.1 then lines.push "Rapid fire"
+		if inspectTower.actual.ammoSpeed > 12 then lines.push "Fast ammo"
+		if inspectTower.actual.ammoDamage > 30 then lines.push "High ammo damage"
+		if inspectTower.actual.maxRange > 150 then lines.push "Long range of acquisition"
+		if inspectTower.actual.ammoRange > 250 then lines.push "Long-range ammo"
+		if inspectTower.actual.acqInterval < 2 then lines.push "Fast acquisition"
+		if inspectTower.actual.reloadTime < 2 then lines.push "Fast reload"
+		if inspectTower.actual.slowingAmmo then lines.push "Ammo slows enemies"
+
+		if inspectTower.onStage then
+			lines.push ""
+			lines.push "[S] Sell tower"
+
+		for text of lines
+			ctx.fillText text, 815, y
+			y += 20
 
 
 	draw = !->
 		ctx.fillStyle = "#000"
-		ctx.fillRect 0, 0, 800, 600
+		ctx.fillRect 0, 0, 1024, 600
 		tooltipText := null
+		inspectTower := null
 		drawScene!
+		ctx.fillStyle = "#000"
+		ctx.fillRect 800, 0, 1024 - 800, 600
 		drawTray!
+		
+		if inspectTower then
+			drawInspect!
+
+
+
 		if tooltipText then
 			ctx.font = "12px Segoe UI, sans-serif"
 			w = ctx.measureText(tooltipText).width
@@ -528,6 +919,9 @@ let document, window
 		if worldSelected and validGridCoords(gridX, gridY) and world.isPlaceable(gridX, gridY) then
 			worldSelected := null
 
+	keyPress = (keyCode) ->
+		if keyCode == 115 and inspectTower and inspectTower.onStage then
+			world.sellTower inspectTower
 
 	step = ->
 		time += 1 / 30.0
@@ -569,9 +963,13 @@ let document, window
 			handleMove mouse, event
 			click!
 
+		document.addEventListener "keypress", !(event) ->
+			console.log event.keyCode
+			keyPress event.keyCode
+
 		newGame!
 		setInterval step, 1000 / 20.0
 
 
 
-	window.EvoTD = {init}
+	window.EvoTD = {init, debug, getWorld: -> world}
