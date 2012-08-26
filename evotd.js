@@ -413,15 +413,15 @@
     function Spawner(){
       superclass.call(this);
       this.ljParams = genLissajousParams();
-      this.figureOutNextSpawn(4);
+      this.figureOutNextSpawn(5);
       this.pool = [enemyGenome.initialize(), enemyGenome.initialize(), enemyGenome.initialize(), enemyGenome.initialize(), enemyGenome.initialize()];
-      this.enemiesLeft = this.enemiesTotal = 200;
+      this.enemiesLeft = this.enemiesTotal = 300;
       this.enemiesSpawned = 0;
     }
     prototype.figureOutNextSpawn = function(multiplier){
       var ival;
       multiplier == null && (multiplier = 1);
-      ival = rand(0.5, 4) * multiplier;
+      ival = rand(0.75, 4) * multiplier;
       return this.nextSpawn = time + ival;
     };
     prototype.draw = function(ctx){
@@ -473,11 +473,11 @@
     function Heart(){
       superclass.call(this);
       this.ljParams = genLissajousParams();
-      this.life = this.maxLife = 50;
+      this.health = this.maxHealth = 50;
       this.damageBlip = 0;
     }
     prototype.damage = function(){
-      this.life--;
+      this.health--;
       this.damageBlip = 15;
       playSound("core-hit");
     };
@@ -700,7 +700,7 @@
         }
         dx = this.x - en.x;
         dy = this.y - en.y;
-        size = Math.max(3, en.actualSize);
+        size = Math.max(4, en.actualSize);
         if (dx * dx + dy * dy < size * size) {
           en.damage(this.attributes.ammoDamage);
           if (this.attributes.slowingAmmo) {
@@ -1105,7 +1105,7 @@
       return world.draw(ctx);
     };
     drawTray = function(){
-      var i, ref$, len$, tower, tx;
+      var enemiesLeft, i, ref$, len$, tower, tx;
       ctx.strokeStyle = "cyan";
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -1117,37 +1117,45 @@
       ctx.beginPath();
       ctx.fillStyle = "silver";
       ctx.font = "14px " + fontStack;
+      enemiesLeft = world.totalEnemiesLeft();
       if (world.gameOver) {
-        ctx.fillText("GAME OVER - YOUR CORE HAS BEEN NOMMED.", 820, 530);
+        ctx.fillStyle = "red";
+        ctx.fillText("GAME OVER.", 820, 530);
+      } else if (enemiesLeft <= 0) {
+        ctx.fillStyle = "lime";
+        ctx.fillText("YOU WIN!", 820, 530);
       }
       ctx.fillText("Credits: " + world.credits, 820, 550);
-      ctx.fillText("Core Health: " + world.heart.life, 820, 570);
-      ctx.fillText("Enemies Left: " + world.totalEnemiesLeft(), 820, 590);
+      ctx.fillText("Core Health: " + world.heart.health, 820, 570);
+      ctx.fillText("Enemies Left: " + enemiesLeft, 820, 590);
       if (world.towerTray.length == 0) {
         ctx.fillText("Click on two towers to evolve them!", 16, 570);
-      } else {
-        for (i = 0, len$ = (ref$ = world.towerTray).length; i < len$; ++i) {
-          tower = ref$[i];
-          ctx.save();
-          tx = 16 + i * 32;
-          ctx.translate(tx, 585);
-          if (mouse.x >= tx - 16 && mouse.x < tx + 16 && mouse.y > 544 || traySelected == tower) {
-            if (traySelected != tower) {
-              setTooltip("Select tower to place");
-            }
-            if (mouse.b) {
-              traySelected = tower;
-              worldSelected = null;
-            }
-            ctx.beginPath();
-            ctx.strokeStyle = tower == traySelected ? "white" : "magenta";
-            ctx.rect(-15, -15, 30, 30);
-            ctx.stroke();
-            inspectTower = tower;
+      }
+      if (world.towers.length == 0) {
+        ctx.fillStyle = (time * 4) % 1 < 0.5 ? "silver" : "white";
+        ctx.fillText("Click on a tower below to place it.", 16, 530);
+      }
+      for (i = 0, len$ = (ref$ = world.towerTray).length; i < len$; ++i) {
+        tower = ref$[i];
+        ctx.save();
+        tx = 16 + i * 32;
+        ctx.translate(tx, 585);
+        if (mouse.x >= tx - 16 && mouse.x < tx + 16 && mouse.y > 544 || traySelected == tower) {
+          if (traySelected != tower) {
+            setTooltip("Select tower to place");
           }
-          tower.draw(ctx);
-          ctx.restore();
+          if (mouse.b) {
+            traySelected = tower;
+            worldSelected = null;
+          }
+          ctx.beginPath();
+          ctx.strokeStyle = tower == traySelected ? "white" : "magenta";
+          ctx.rect(-15, -15, 30, 30);
+          ctx.stroke();
+          inspectTower = tower;
         }
+        tower.draw(ctx);
+        ctx.restore();
       }
     };
     drawInspect = function(){
@@ -1286,7 +1294,7 @@
       }
     };
     step = function(){
-      time += 1 / 30.0;
+      time += 1 / 22.0;
       return draw();
     };
     newGame = function(){
@@ -1342,7 +1350,7 @@
       loadSound("clone", "clone.wav");
       loadSound("sell", "sell.wav");
       newGame();
-      return setInterval(step, 1000 / 20.0);
+      return setInterval(step, 1000 / 22.0);
     };
     window.EvoTD = {
       init: init,

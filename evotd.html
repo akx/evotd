@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8">
 	<title>EvoTD</title>
-	<script type="text/javascript" src="evotd.js"></script>
+	
 	<style type="text/css">
 	body,button{font:12pt/14pt Corbel,Segoe UI,sans-serif}
 	body{margin:0;background:#000;color:#FFF}
@@ -13,6 +13,7 @@
 	</style>
 </head>
 <body>
+
 <canvas id="canvas" width="1024" height="600"></canvas><br>
 <button onclick="if(confirm('Restart?')) EvoTD.newGame();">New Game</button>
 <button onclick="EvoTD.setSounds(true);">Sound On</button>
@@ -20,10 +21,20 @@
 <br>
 <div id="cr">
 	EvoTD &ndash; by <a href="http://twitter.com/akx">@akx</a> / <tt title="LD username">akx</tt> for Ludum Dare 24.<br>
+	This project was started on Sunday August 26, 10:12 GMT and released roughly 12 hours later.<br>
 	Works on modern Chromes and Firefoxes. <a href="evotd.co">Source.</a><br>
-	This game makes no guarantees of even trying to be fair. But it's sorta fun to play.<br>
-	Btw: The enemy also evolves.
+	<br>
+	Some protips:
+	<ul>
+		<li>The enemy also evolves.</li>
+		<li>It's usually not a good idea to sell your towers.</li>
+		<li>Mutations may happen even when [C]loning your towers.</li>
+		<li>The enemy <i>really</i> rages if it can't find a route to your core.</li>
+		<li>This game makes no guarantees of even trying to be fair. Remember: Dying is fun. <small>And who knows, maybe next time your starting gene (tower) pool will be more awesome.</small></li>
+		<li>A "?" on a tower means it hasn't acquired an enemy. A "R" means it's busy reloading.</li>
+	</ul>
 </div>
+<script type="text/javascript" src="evotd.min.js"></script>
 <script type="text/javascript">setTimeout(function() { EvoTD.init(); }, 50)</script>
 </body>
 </html>

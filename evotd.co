@@ -328,14 +328,14 @@ class Spawner extends GridObject
 	->
 		super!
 		@ljParams = genLissajousParams!
-		@figureOutNextSpawn(4)
+		@figureOutNextSpawn(5)
 		@pool = [enemyGenome.initialize!, enemyGenome.initialize!, enemyGenome.initialize!, enemyGenome.initialize!, enemyGenome.initialize!]
-		@enemiesLeft = @enemiesTotal = 200
+		@enemiesLeft = @enemiesTotal = 300
 		@enemiesSpawned = 0
 
 
 	figureOutNextSpawn: (multiplier = 1) ->
-		ival = rand(0.5, 4) * multiplier
+		ival = rand(0.75, 4) * multiplier
 		@nextSpawn = time + ival 
 
 	draw: !(ctx) ->
@@ -380,11 +380,11 @@ class Heart extends GridObject
 	->
 		super!
 		@ljParams = genLissajousParams!
-		@life = @maxLife = 50
+		@health = @maxHealth = 50
 		@damageBlip = 0
 
 	damage: !->
-		@life --
+		@health --
 		@damageBlip = 15
 		playSound "core-hit"
 
@@ -589,7 +589,7 @@ class Shot extends GridObject
 			dx = @x - en.x
 			dy = @y - en.y
 
-			size = Math.max(3, en.actualSize)
+			size = Math.max(4, en.actualSize)
 
 			if (dx * dx) + (dy * dy) < (size * size) then
 				en.damage @attributes.ammoDamage
@@ -935,32 +935,40 @@ let document, window
 		ctx.beginPath!
 		ctx.fillStyle = "silver"
 		ctx.font = "14px #fontStack"
+		enemiesLeft = world.totalEnemiesLeft()
 		if world.gameOver then
-			ctx.fillText "GAME OVER - YOUR CORE HAS BEEN NOMMED.", 820, 530
+			ctx.fillStyle = "red"
+			ctx.fillText "GAME OVER.", 820, 530
+		else if enemiesLeft <= 0 then
+			ctx.fillStyle = "lime"
+			ctx.fillText "YOU WIN!", 820, 530
 		ctx.fillText "Credits: #{world.credits}", 820, 550
-		ctx.fillText "Core Health: #{world.heart.life}", 820, 570
-		ctx.fillText "Enemies Left: #{world.totalEnemiesLeft()}", 820, 590
+		ctx.fillText "Core Health: #{world.heart.health}", 820, 570
+		ctx.fillText "Enemies Left: #{enemiesLeft}", 820, 590
 
 		if world.towerTray.length == 0 then
 			ctx.fillText "Click on two towers to evolve them!", 16, 570
-		else
-			for tower, i of world.towerTray
-				ctx.save!
-				tx = 16 + i * 32
-				ctx.translate tx, 585
-				if mouse.x >= tx - 16 and mouse.x < tx + 16 and mouse.y > 544 or (traySelected == tower) then
-					if traySelected != tower then
-						setTooltip "Select tower to place"
-					if mouse.b then
-						traySelected := tower
-						worldSelected := null
-					ctx.beginPath!
-					ctx.strokeStyle = (if tower == traySelected then "white" else "magenta")
-					ctx.rect -15, -15, 30, 30
-					ctx.stroke!
-					inspectTower := tower
-				tower.draw(ctx)
-				ctx.restore!
+		if world.towers.length == 0 then
+			ctx.fillStyle = if((time * 4) % 1 < 0.5) then "silver" else "white"
+			ctx.fillText "Click on a tower below to place it.", 16, 530
+		
+		for tower, i of world.towerTray
+			ctx.save!
+			tx = 16 + i * 32
+			ctx.translate tx, 585
+			if mouse.x >= tx - 16 and mouse.x < tx + 16 and mouse.y > 544 or (traySelected == tower) then
+				if traySelected != tower then
+					setTooltip "Select tower to place"
+				if mouse.b then
+					traySelected := tower
+					worldSelected := null
+				ctx.beginPath!
+				ctx.strokeStyle = (if tower == traySelected then "white" else "magenta")
+				ctx.rect -15, -15, 30, 30
+				ctx.stroke!
+				inspectTower := tower
+			tower.draw(ctx)
+			ctx.restore!
 
 	drawInspect = !->
 		ctx.font = "14px #fontStack"
@@ -1057,7 +1065,7 @@ let document, window
 			world.cloneTower inspectTower
 
 	step = ->
-		time += 1 / 30.0
+		time += 1 / 22.0
 		draw!
 
 	newGame = ->
@@ -1105,7 +1113,7 @@ let document, window
 		loadSound "sell", "sell.wav"
 
 		newGame!
-		setInterval step, 1000 / 20.0
+		setInterval step, 1000 / 22.0
 
 
 
