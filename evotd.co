@@ -99,36 +99,38 @@ aStar = (start, goal, getNeighbors) ->
 	while open.length
 		open = open.sort (a, b) -> (fScore[a.id] - fScore[b.id])
 		current = open.shift!
-		delete openIds[current.id]
+		currentId = current.id
+		delete openIds[currentId]
 
-		if current.id == goal.id then return reconstructPath!
-		closed[current.id] = 1
+		if currentId == goal.id then return reconstructPath!
+		closed[currentId] = 1
 		for neighbor of getNeighbors(current)
-			continue if closed[neighbor.id]
-			tentativeG = gScore[current.id] + dist(current, neighbor)
-			if not openIds[neighbor.id] or tentativeG < gScore[neighbor.id]
+			neighborId = neighbor.id
+			continue if closed[neighborId]
+			tentativeG = gScore[currentId] + dist(current, neighbor)
+			if not openIds[neighborId] or tentativeG < gScore[neighborId]
 				putOpen(neighbor, tentativeG)
-				cameFrom[neighbor.id] = current
-				fScore[neighbor.id] = gScore[neighbor.id] + heuristic(neighbor, goal)
+				cameFrom[neighborId] = current
+				fScore[neighborId] = gScore[neighborId] + heuristic(neighbor, goal)
 	return null
 
 ######################################################################################################
 
+Sound = let
+	sounds = {}
+	enableSound = true
 
-sounds = {}
-enableSound = true
-
-loadSound = (name, url) ->
-	audio = new Audio()
-	audio.setAttribute "src", url
-	audio.load!
-	sounds[name] = audio
-
-playSound = (name) ->
-	return unless enableSound
-	sound = sounds[name]
-	sound.play!
-
+	return {
+		setEnabled: !(flag) -> enableSound := !!flag
+		load: !(name, url) ->
+			audio = new Audio()
+			audio.setAttribute "src", url
+			audio.load!
+			sounds[name] = audio
+		play: !(name) ->
+			return unless enableSound
+			sounds[name]?.play!
+	}
 
 
 ######################################################################################################
@@ -202,7 +204,7 @@ class Tower extends GridObject
 		@damageBlip = false
 		@generation = 0
 
-		@actual = {
+		@actual = actual = {
 			maxAmmo: 0 | lerp(1, 50, @attributes.reloadAmmo)
 			shotInterval: 1.0 / lerp(3, 20, @attributes.shootSpeed)
 			acqInterval: lerp(4, 0.3, @attributes. acquisitionSpeed)
@@ -215,23 +217,23 @@ class Tower extends GridObject
 			slowingAmmo: (@attributes.slowingAmmo > 0.75)
 			homingAmmo: (@attributes.homingAmmo > 0.85)
 		}
-		@actual.dps = @actual.ammoDamage / (1.0 / @actual.shotInterval)
-		@depletionTime = @actual.maxAmmo * @actual.shotInterval + 0.1
+		actual.dps = actual.ammoDamage / (1.0 / actual.shotInterval)
+		@depletionTime = actual.maxAmmo * actual.shotInterval + 0.1
 		@reload!
 		hue = 0 | (@attributes.hue * 360)
 		@fillStyle = "hsl(#hue,100%,50%)"
 
-	reload: ->
+	reload: !->
 		@ammo = @actual.maxAmmo
 		@nextShot = 0
 		@nextReload = 0
 		@reloading = false
 	
-	beginReload: ->	
+	beginReload: !->	
 		@reloading = true
 		@nextReload = time + @depletionTime + @actual.reloadTime
 
-	reacquire: ->
+	reacquire: !->
 		@unacquire!
 
 		closestEnemy = null
@@ -253,7 +255,7 @@ class Tower extends GridObject
 
 
 
-	step: ->
+	step: !->
 		@onStage = true
 		if time >= @nextAcquisition then
 			@reacquire!
@@ -275,10 +277,9 @@ class Tower extends GridObject
 					@shoot @acquiredEnemy
 					@ammo --
 
-	shoot: (target) ->
-		shot = new Shot(@x, @y, @fillStyle, @actual, target)
-		world.ammo.push shot
-		playSound "shoot"
+	shoot: !(target) ->
+		world.ammo.push new Shot(@x, @y, @fillStyle, @actual, target)
+		Sound.play "shoot"
 
 
 	draw: !(ctx) ->
@@ -323,10 +324,10 @@ class Tower extends GridObject
 				ctx.beginPath!
 				ctx.fillText "?", -2, 0
 
-	damage: ->
+	damage: !->
 		@health--
 		@damageBlip = true
-		playSound "tower-hurt"
+		Sound.play "tower-hurt"
 		if @health <= 0 then @dead = true
 
 
@@ -335,12 +336,12 @@ class Spawner extends GridObject
 		super!
 		@ljParams = genLissajousParams!
 		@figureOutNextSpawn(5)
-		@pool = [enemyGenome.initialize!, enemyGenome.initialize!, enemyGenome.initialize!, enemyGenome.initialize!, enemyGenome.initialize!]
+		@pool = (for x from 0 til 5 then enemyGenome.initialize!)
 		@enemiesLeft = @enemiesTotal = 300
 		@enemiesSpawned = 0
 
 
-	figureOutNextSpawn: (multiplier = 1) ->
+	figureOutNextSpawn: !(multiplier = 1) ->
 		ival = rand(0.75, 4) * multiplier
 		@nextSpawn = time + ival 
 
@@ -392,7 +393,7 @@ class Heart extends GridObject
 	damage: !->
 		@health --
 		@damageBlip = 15
-		playSound "core-hit"
+		Sound.play "core-hit"
 
 	draw: !(ctx) ->
 		ctx.strokeStyle = "lime"
@@ -538,7 +539,7 @@ class Enemy extends GridObject
 
 		@route = route
 
-	damage: (val) ->
+	damage: !(val) ->
 		return if @health <= 0
 		@health -= val
 		@damageBlip = true
@@ -547,9 +548,9 @@ class Enemy extends GridObject
 			n = (2 + 0 | Math.ceil(@maxHealth / 75))
 			world.credits += n
 			@dead = true
-			playSound "kill"
+			Sound.play "kill"
 		else
-			playSound "ammo-hit"
+			Sound.play "ammo-hit"
 
 
 class Shot extends GridObject
@@ -675,14 +676,14 @@ class World
 		return false if @checkGridObj(@objs, gridX, gridY)
 		return true
 
-	placeTower: (tower, gridX, gridY) ->
+	placeTower: !(tower, gridX, gridY) ->
 		for i from 0 til @towerTray.length
 			if @towerTray[i] == tower then
 				@towerTray.splice i, 1
 				break
 		tower.setGridCoords(gridX, gridY)
 		@towers.push tower
-		playSound "place"
+		Sound.play "place"
 		creep.reroute! for creep of @creeps
 
 	_process: (aDrawables) ->
@@ -698,7 +699,7 @@ class World
 			i += 1
 		return aDrawables
 
-	draw: (ctx) ->
+	draw: !(ctx) ->
 		drawables = [].concat(
 			@_process(@creeps),
 			@_process(@towers),
@@ -758,12 +759,12 @@ class World
 				tower.onStage = false
 				@towers.splice(i, 1)
 				@credits += 3
-				playSound "sell"
+				Sound.play "sell"
 
 				break
 
 	cloneTower: !(tower) ->
-		playSound "clone"
+		Sound.play "clone"
 		evTower = new Tower(towerGenome.evolve(tower.attributes, tower.attributes, @towerMutationRate))
 		@towerTray.push evTower
 		evTower.generation = tower.generation
@@ -842,20 +843,20 @@ let document, window
 	setTooltip = !->
 		tooltipText := "#it"
 
-	drawGrid = ->
-		ctx.beginPath!
-		ctx.strokeStyle = "purple"
-		ctx.lineWidth = 1
-		for x from 0 til 800 by 32
-			ctx.moveTo x + 0.5, 0
-			ctx.lineTo x + 0.5, 544
-		for y from 0 til 544 by 32
-			ctx.moveTo 0, y + 0.5
-			ctx.lineTo 800, y + 0.5
-		ctx.stroke!
+	# drawGrid = !->
+	# 	ctx.beginPath!
+	# 	ctx.strokeStyle = "purple"
+	# 	ctx.lineWidth = 1
+	# 	for x from 0 til 800 by 32
+	# 		ctx.moveTo x + 0.5, 0
+	# 		ctx.lineTo x + 0.5, 544
+	# 	for y from 0 til 544 by 32
+	# 		ctx.moveTo 0, y + 0.5
+	# 		ctx.lineTo 800, y + 0.5
+	# 	ctx.stroke!
 
 
-	drawScene = ->
+	drawScene = !->
 
 		#drawGrid!
 		if traySelected then
@@ -871,7 +872,6 @@ let document, window
 
 		if worldSelected and not worldSelected.onStage then
 			worldSelected := null
-		worldSelectedChanged = false
 		canEvolve = true
 		if world.towerTray.length >= 10 then canEvolve = false; cantEvolveReason = "Too many towers in tray"
 		if world.credits < 5 then canEvolve = false; cantEvolveReason = "Not enough credits"
@@ -902,7 +902,7 @@ let document, window
 					ctx.stroke!
 					if mouse.b then
 						if canEvolve and worldSelected and worldSelected != tower then
-							playSound "evolve"
+							Sound.play "evolve"
 							evTower = new Tower(towerGenome.evolve(worldSelected.attributes, tower.attributes, world.towerMutationRate))
 							evTower.generation = Math.max(worldSelected.generation, tower.generation) + 1
 							world.credits -= 5
@@ -911,7 +911,6 @@ let document, window
 							traySelected := evTower
 						else
 							worldSelected := tower
-							worldSelectedChanged = true
 
 		if evolveTarget then inspectTower := evolveTarget
 
@@ -977,42 +976,43 @@ let document, window
 			ctx.restore!
 
 	drawInspect = !->
+		return unless inspectTower
+		actual = inspectTower.actual
 		ctx.font = "14px #fontStack"
 		ctx.beginPath!
 		ctx.fillStyle = "white"
 		y = 20
 		lines = []
 		lines.push("Generation #{inspectTower.generation}")
-		for key, val in inspectTower.actual
+		for key, val in actual
 			if key = traitNames[key] then
 				txval = (if val == (0 | val) then "#val" else val.toFixed(2))
 				lines.push("#key: #txval")
-		lines.push ""
-		if inspectTower.actual.maxAmmo < 10 then lines.push "Low ammo"
-		if inspectTower.actual.reloadTime > 5 then lines.push "Slow reload"
-		if inspectTower.actual.maxRange < 50 then lines.push "Low range of acquisition"
-		if inspectTower.actual.acqInterval > 3 then lines.push "Slow acquisition"
-		if inspectTower.actual.ammoRange < 120 then lines.push "Low-range ammo"
-		if inspectTower.actual.ammoDamage < 12 then lines.push "Low damage ammo"
-		
-		if inspectTower.actual.shotInterval < 0.1 then lines.push "Rapid fire"
-		if inspectTower.actual.ammoSpeed > 12 then lines.push "Fast ammo"
-		if inspectTower.actual.ammoDamage > 30 then lines.push "High ammo damage"
-		if inspectTower.actual.maxRange > 150 then lines.push "Long range of acquisition"
-		if inspectTower.actual.ammoRange > 250 then lines.push "Long-range ammo"
-		if inspectTower.actual.acqInterval < 2 then lines.push "Fast acquisition"
-		if inspectTower.actual.reloadTime < 2 then lines.push "Fast reload"
-		if inspectTower.actual.slowingAmmo then lines.push "Ammo slows enemies"
-		if inspectTower.actual.homingAmmo then lines.push "Ammo homes on enemies"
+		lines.push null
+		if actual.maxAmmo < 10 then lines.push "Low ammo"
+		if actual.reloadTime > 5 then lines.push "Slow reload"
+		if actual.maxRange < 50 then lines.push "Low range of acquisition"
+		if actual.acqInterval > 3 then lines.push "Slow acquisition"
+		if actual.ammoRange < 120 then lines.push "Low-range ammo"
+		if actual.ammoDamage < 12 then lines.push "Low damage ammo"
+		if actual.shotInterval < 0.1 then lines.push "Rapid fire"
+		if actual.ammoSpeed > 12 then lines.push "Fast ammo"
+		if actual.ammoDamage > 30 then lines.push "High ammo damage"
+		if actual.maxRange > 150 then lines.push "Long range of acquisition"
+		if actual.ammoRange > 250 then lines.push "Long-range ammo"
+		if actual.acqInterval < 2 then lines.push "Fast acquisition"
+		if actual.reloadTime < 2 then lines.push "Fast reload"
+		if actual.slowingAmmo then lines.push "Ammo slows enemies"
+		if actual.homingAmmo then lines.push "Ammo homes on enemies"
 
 		if inspectTower.onStage then
-			lines.push ""
+			lines.push null
 			lines.push "[S] Sell tower (+3 CR)"
 			if world.credits >= 10 then 
 				lines.push "[C] Clone tower (-10 CR)"
 
 		for text of lines
-			ctx.fillText text, 815, y
+			ctx.fillText text, 815, y if text
 			y += 20
 
 
@@ -1064,7 +1064,7 @@ let document, window
 		if worldSelected and validGridCoords(gridX, gridY) and world.isPlaceable(gridX, gridY) then
 			worldSelected := null
 
-	keyPress = (keyCode) ->
+	keyPress = !(keyCode) ->
 		if keyCode == 115 and inspectTower and inspectTower.onStage then
 			world.sellTower inspectTower
 		if keyCode == 99 and inspectTower and world.credits >= 10 and world.towerTray.length < 10 then
@@ -1072,22 +1072,22 @@ let document, window
 		if keyCode == 97 and world.towerTray.length > 0 then
 			traySelected := world.towerTray[0]
 
-	step = ->
+	step = !->
 		time += 1 / 22.0
 		draw!
 
-	newGame = ->
+	newGame = !->
 		world := new World()
 		world.newGame!
 		
 
 
-	init = ->
+	init = !->
 		$ = -> document.getElementById it
 		canvas := $("canvas")
 		ctx := canvas.getContext "2d"
 
-		handleMove = (into, event) ->
+		handleMove = !(into, event) ->
 			into.x = event.offsetX || event.clientX
 			into.y = event.offsetY || event.clientY
 			gx = 0 | (into.x / 32)
@@ -1110,19 +1110,25 @@ let document, window
 		canvas.addEventListener "click", (!(event) -> handleMove mouse, event; click!), false
 		document.addEventListener "keypress", (!(event) -> keyPress event.keyCode || event.charCode), false
 
-		loadSound "core-hit", "core-hit2.wav"
-		loadSound "ammo-hit", "ammo-hit.wav"
-		loadSound "kill", "kill.wav"
-		loadSound "tower-hurt", "tower-hurt.wav"
-		loadSound "place", "place.wav"
-		loadSound "shoot", "shoot.wav"
-		loadSound "evolve", "evolve.wav"
-		loadSound "clone", "clone.wav"
-		loadSound "sell", "sell.wav"
+		Sound.load "core-hit", "core-hit2.wav"
+		Sound.load "ammo-hit", "ammo-hit.wav"
+		Sound.load "kill", "kill.wav"
+		Sound.load "tower-hurt", "tower-hurt.wav"
+		Sound.load "place", "place.wav"
+		Sound.load "shoot", "shoot.wav"
+		Sound.load "evolve", "evolve.wav"
+		Sound.load "clone", "clone.wav"
+		Sound.load "sell", "sell.wav"
 
 		newGame!
 		setInterval step, 1000 / 22.0
 
 
 
-	window.EvoTD = {init, debug, newGame, getWorld: -> world, setSounds: -> enableSound := !!it}
+	window.EvoTD = {
+		init,
+		debug,
+		newGame,
+		getWorld: -> world,
+		setSounds: !-> Sound.setEnabled(it)
+	}

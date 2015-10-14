@@ -1,0 +1,21 @@
+<!DOCTYPE HTML>
+<html lang="en-US">
+<head>
+	<meta charset="UTF-8">
+	<title>EvoTD DEV</title>
+	<style type="text/css">
+	body{margin:0}
+	</style>
+</head>
+<body>
+
+<canvas id="canvas" width="1024" height="600"></canvas><br>
+<button onclick="if(confirm('Restart?')) EvoTD.newGame();">New Game</button>
+<button onclick="EvoTD.setSounds(true);">Sound On</button>
+<button onclick="EvoTD.setSounds(false);">Sound Off</button><br>
+
+<script type="text/javascript" src="evotd.xx.js"></script>
+<script type="text/javascript">setTimeout(function() { EvoTD.init(); }, 50)</script>
+</body>
+</html>
+
